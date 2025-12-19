@@ -1,0 +1,19 @@
+# data
+data/raw/
+data/processed/
+*.parquet
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# notebooks
+.ipynb_checkpoints/
+
+# OS/editor
+.DS_Store
+.vscode/
