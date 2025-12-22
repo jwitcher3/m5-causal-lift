@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
 import numpy as np
 import polars as pl
 
 
 def _ridge_weights(X: np.ndarray, y: np.ndarray, alpha: float = 1.0) -> np.ndarray:
-    """Closed-form ridge: w = (X'X + alpha I)^-1 X'y"""
     k = X.shape[1]
     A = (X.T @ X) + alpha * np.eye(k)
     b = X.T @ y
@@ -19,10 +17,12 @@ def _ridge_weights(X: np.ndarray, y: np.ndarray, alpha: float = 1.0) -> np.ndarr
 
 
 def _align_columns(prev: pl.DataFrame, cur: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Align schemas for concat, casting NULL cols to target dtypes (older Polars-safe)."""
+    """Align schemas for concat, casting NULL columns to target dtypes (older Polars-safe)."""
     prev_schema = prev.schema
     cur_schema = cur.schema
     all_cols = sorted(set(prev_schema.keys()) | set(cur_schema.keys()))
+
+    # prefer current dtype if present
     target = {c: (cur_schema.get(c) or prev_schema.get(c) or pl.Null) for c in all_cols}
 
     def coerce(df: pl.DataFrame, schema: dict) -> pl.DataFrame:
@@ -45,9 +45,8 @@ def main():
     p.add_argument("--processed_dir", type=str, default="data/processed")
     p.add_argument("--campaign_id", type=str, default="cmp_001")
     p.add_argument("--alpha", type=float, default=10.0)
-    p.add_argument("--donor_grain", type=str, default="store", choices=["store", "store_dept"])
     p.add_argument("--use_log1p", action="store_true")
-    p.add_argument("--enforce_simplex", action="store_true", default=True)
+    p.add_argument("--donor_grain", type=str, default="store", choices=["store", "store_dept"])
     args = p.parse_args()
 
     processed = Path(args.processed_dir)
@@ -57,26 +56,22 @@ def main():
 
     gt = pl.read_parquet(gt_path).filter(pl.col("campaign_id") == args.campaign_id)
 
-    # Aggregate treated series
+    # Treated aggregate time series
     treated_ts = (
         gt.filter(pl.col("treated") == 1)
-        .group_by("date")
-        .agg(
-            pl.col("y_obs").sum().alias("y_treated"),
-            pl.col("tau").sum().alias("tau_true"),
-            pl.col("in_campaign").max().alias("in_campaign"),
-        )
-        .sort("date")
+          .group_by("date")
+          .agg(
+              pl.col("y_obs").sum().alias("y_treated"),
+              pl.col("tau").sum().alias("tau_true"),
+              pl.col("in_campaign").max().alias("in_campaign"),
+          )
+          .sort("date")
     )
 
-    # Truth consistent with this SCM setup: average daily total tau during campaign
-    att_true = float(
-        treated_ts.filter(pl.col("in_campaign") == 1)
-        .select(pl.col("tau_true").mean())
-        .item()
-    )
+    # True ATT at aggregate level: average daily lift in treated aggregate series during campaign
+    att_true = float(treated_ts.filter(pl.col("in_campaign") == 1).select(pl.col("tau_true").mean()).item())
 
-    # Donors from control units only
+    # Donor pool: controls
     controls = gt.filter(pl.col("treated") == 0)
 
     if args.donor_grain == "store":
@@ -90,10 +85,11 @@ def main():
         pl.concat_str([pl.col(c).cast(pl.Utf8) for c in donor_id_cols], separator="|").alias("donor_id")
     )
 
+    # Pivot donors wide
     donor_wide = (
         donors.pivot(values="y", index="date", on="donor_id", aggregate_function="first")
-        .sort("date")
-        .fill_null(0)
+              .sort("date")
+              .fill_null(0)
     )
 
     panel = (
@@ -113,85 +109,57 @@ def main():
     y_pre_units = pre["y_treated"].to_numpy().astype(np.float64)
     X_pre_units = pre.select(donor_cols).to_numpy().astype(np.float64)
 
-    # Fit scale selection
     if args.use_log1p:
         y_pre = np.log1p(y_pre_units)
         X_pre = np.log1p(X_pre_units)
         X_all_fit = np.log1p(X_all_units)
-        y_all_fit = np.log1p(y_all_units)
     else:
         y_pre = y_pre_units
         X_pre = X_pre_units
         X_all_fit = X_all_units
-        y_all_fit = y_all_units
+w = _ridge_weights(X_pre, y_pre, alpha=args.alpha)
 
-    # Fit ridge weights
-    w = _ridge_weights(X_pre, y_pre, alpha=args.alpha)
+y0_hat_fit = X_all_fit @ w
+y0_hat = np.expm1(y0_hat_fit) if args.use_log1p else y0_hat_fit
 
-    # SCM-style stabilization: nonnegative + sum-to-1 (convex combo)
-    if args.enforce_simplex:
-        w = np.clip(w, 0, None)
-        s = float(w.sum())
-        if s > 0:
-            w = w / s
+in_c = panel["in_campaign"].to_numpy().astype(np.int64)
+att_hat = float(np.mean((y_all_units - y0_hat)[in_c == 1]))
 
-    # Predict counterfactual on fit scale
-    y0_hat_fit = X_all_fit @ w
+# RMSE on the fit scale (raw or log)
+rmse_pre = float(np.sqrt(np.mean((y_pre - (X_pre @ w)) ** 2)))
 
-    # Convert to units for a units-ATT, if needed
-    y0_hat_units = np.expm1(y0_hat_fit) if args.use_log1p else y0_hat_fit
 
-    in_c = panel["in_campaign"].to_numpy().astype(np.int64)
+res = pl.DataFrame([{
+        "campaign_id": args.campaign_id,
+        "method": f"scm_ridge_{args.donor_grain}",
+        "att_hat": att_hat,
+        "att_true": att_true,
+        "bias": att_hat - att_true,
+        "alpha": args.alpha,
+        "rmse_pre": rmse_pre,
+        "n_dates": int(panel.height),
+        "n_donors": int(len(donor_cols)),
+    }])
 
-    # Preferred lift metric for log fitting: difference on fit scale, plus implied percent
-    att_hat_fit = float(np.mean((y_all_fit - y0_hat_fit)[in_c == 1]))
-    att_hat_pct = float(np.expm1(att_hat_fit)) if args.use_log1p else float("nan")
-
-    # Also compute units lift (secondary)
-    att_hat_units = float(np.mean((y_all_units - y0_hat_units)[in_c == 1]))
-
-    rmse_pre = float(np.sqrt(np.mean((y_pre - (X_pre @ w)) ** 2)))
-
-    method_name = f"scm_ridge_{args.donor_grain}" + ("_log1p" if args.use_log1p else "")
-    if args.enforce_simplex:
-        method_name += "_simplex"
-
-    res = pl.DataFrame(
-        [{
-            "campaign_id": args.campaign_id,
-            "method": method_name,
-            "att_hat": att_hat_units,
-            "att_hat_fit": att_hat_fit,
-            "att_hat_pct": att_hat_pct,
-            "att_true": att_true,
-            "bias": att_hat_units - att_true,
-            "alpha": float(args.alpha),
-            "rmse_pre": rmse_pre,
-            "n_dates": int(panel.height),
-            "n_donors": int(len(donor_cols)),
-            "fit_scale": "log1p" if args.use_log1p else "raw",
-        }]
-    )
-
-    # Append to method results (schema-safe)
-    out_results = processed / "fact_method_results.parquet"
-    if out_results.exists():
+out_results = processed / "fact_method_results.parquet"
+if out_results.exists():
         prev = pl.read_parquet(out_results)
         prev2, res2 = _align_columns(prev, res)
         out = pl.concat([prev2, res2], how="vertical").unique(subset=["campaign_id", "method"], keep="last")
     else:
         out = res
+
     out.write_parquet(out_results)
 
-    # Save time series for plotting
-    ts = (
+    # Save series for plotting/dashboard later
+ts = (
         panel.select(["date", "y_treated", "in_campaign"])
-        .with_columns(pl.Series("y0_hat", y0_hat_units.tolist()).cast(pl.Float64))
+        .with_columns(pl.Series("y0_hat", y0_hat.tolist()).cast(pl.Float64))
         .with_columns((pl.col("y_treated") - pl.col("y0_hat")).alias("lift_hat"))
     )
-    ts.write_parquet(processed / f"scm_series_{args.campaign_id}_{args.donor_grain}{'_log1p' if args.use_log1p else ''}.parquet")
+ts.write_parquet(processed / f"scm_series_{args.campaign_id}_{args.donor_grain}.parquet")
 
-    print(res)
+print(res)
 
 
 if __name__ == "__main__":

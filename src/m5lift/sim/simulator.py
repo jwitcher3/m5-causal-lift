@@ -96,6 +96,7 @@ def simulate_campaign(
     treated_units = unit_df.select(keys)[treated_idx]
     treated_units = treated_units.with_columns(pl.lit(1).alias("treated_unit"))
 
+
     # Join treated flag back to daily panel
     df = df.join(treated_units, on=keys, how="left").with_columns(
         pl.col("treated_unit").fill_null(0).cast(pl.Int8).alias("treated")
@@ -186,17 +187,9 @@ def simulate_campaign(
     gt.write_parquet(out_dir / "fact_ground_truth.parquet")
 
     # Print quick summary
-    start_dt = pl.lit(spec.start_date).str.strptime(pl.Date, "%Y-%m-%d")
-    end_dt = pl.lit(spec.end_date).str.strptime(pl.Date, "%Y-%m-%d")
-
-    att_true = (
-        gt.lazy()
-          .filter((pl.col("date") >= start_dt) & (pl.col("date") <= end_dt) & (pl.col("treated") == 1))
-          .select(pl.col("tau").mean())
-          .collect()
-          .item()
-    )
-
+    post_mask = (gt["date"] >= pl.date(spec.start_date)) & (gt["date"] <= pl.date(spec.end_date))
+    treated_mask = gt["treated"] == 1
+    att_true = gt.filter(post_mask & treated_mask).select(pl.mean("tau")).item()
     print(f"Campaign {spec.campaign_id}: treated_units={n_treated:,}/{n_units:,} true_ATT(mean tau in-campaign)={att_true:.4f}")
 
 
