@@ -37,9 +37,55 @@ if eval_path.exists():
 else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
 
+
 # --- Choose best SCM method automatically (log1p preferred) ---
 best_scm_method = None
 best_scm_row = None
+
+
+
+# --- Choose best DiD method automatically (unit ATT) ---
+best_did_row = None
+if ev is not None:
+    best_did = (
+        ev.filter(
+            (pl.col("method") == "twfe_did")  # tighten if you add more DiD variants later
+            & (pl.col("truth_used") == "unit_att")
+        )
+        .sort("abs_bias")
+    )
+    if best_did.height > 0:
+        best_did_row = best_did.row(0, named=True)
+
+st.subheader("Overview")
+
+c1, c2, c3, c4 = st.columns(4)
+
+# SCM KPI (percent lift)
+if best_scm_row is not None:
+    true_pct = float(best_scm_row.get("att_true_pct"))
+    est_pct = None
+    if best_scm_row.get("att_hat_pct") is not None:
+        est_pct = float(best_scm_row["att_hat_pct"])
+    elif best_scm_row.get("truth_used") == "log1p_att":
+        est_pct = float(np.expm1(float(best_scm_row["att_hat_used"])))
+
+    c1.metric("True lift (%)", f"{true_pct*100:.2f}%")
+    if est_pct is not None:
+        c2.metric("SCM est lift (%)", f"{est_pct*100:.2f}%")
+        c3.metric("SCM error (pp)", f"{(est_pct-true_pct)*100:.2f} pp")
+    c4.metric("SCM method", str(best_scm_row.get("method")))
+else:
+    c1.metric("True lift (%)", "—")
+    c2.metric("SCM est lift (%)", "—")
+    c3.metric("SCM error (pp)", "—")
+    c4.metric("SCM method", "—")
+
+# DiD KPI (unit ATT)
+if best_did_row is not None:
+    st.caption(f"DiD (unit ATT): est={best_did_row['att_hat_used']:.2f} vs true={best_did_row['att_true_used']:.2f} (bias={best_did_row['bias']:.2f})")
+
+
 if ev is not None:
     best = (
         ev.filter(
