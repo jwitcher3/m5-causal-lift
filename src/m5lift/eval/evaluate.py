@@ -1,54 +1,58 @@
 from __future__ import annotations
 
 import argparse
+import numpy as np
 from pathlib import Path
 import polars as pl
 
 
-def compute_truth(gt: pl.DataFrame) -> pl.DataFrame:
-    """
-    Compute multiple ground-truth ATT definitions from fact_ground_truth:
+def compute_truth(gt_c: pl.DataFrame) -> pl.DataFrame:
+    treated = pl.col("treated").cast(pl.Int8) == 1
+    in_camp = pl.col("in_campaign").cast(pl.Int8) == 1
 
-    - att_true_unit: mean(tau) for treated unit-days in campaign (matches DiD coefficient scale)
-    - att_true_agg: mean over dates of sum(tau) across treated units (matches SCM aggregate-units scale)
-    - att_true_log1p: mean over dates of [log1p(Y_treated) - log1p(Y_cf)] in campaign
-      where Y_cf = sum(y_obs - tau) across treated units (counterfactual with no treatment)
-    - att_true_pct: exp(att_true_log1p)-1
-    """
-    # unit-level truth
+    # Unit-day ATT: mean tau across treated unit-days during campaign
     att_true_unit = (
-        gt.filter((pl.col("treated") == 1) & (pl.col("in_campaign") == 1))
-          .select(pl.col("tau").mean().alias("att_true_unit"))
+        gt_c.filter(treated & in_camp)
+        .select(pl.col("tau").mean().alias("att_true_unit"))
     )
 
-    # daily treated aggregates (observed and counterfactual)
-    daily = (
-        gt.filter(pl.col("treated") == 1)
-          .group_by("date")
-          .agg(
-              pl.col("in_campaign").max().alias("in_campaign"),
-              pl.col("tau").sum().alias("tau_sum"),
-              pl.col("y_obs").sum().alias("y_treated_sum"),
-              (pl.col("y_obs") - pl.col("tau")).sum().alias("y_cf_sum"),
-          )
-          .sort("date")
+    # Aggregate treated-series ATT (units): sum tau by date then average across campaign dates
+    treated_daily = (
+        gt_c.filter(treated)
+        .group_by("date")
+        .agg(
+            pl.col("tau").sum().alias("tau_sum"),
+            pl.col("y_obs").sum().alias("y_obs_sum"),
+            (pl.col("y_obs") - pl.col("tau")).sum().alias("y0_sum"),
+            pl.col("in_campaign").max().cast(pl.Int8).alias("in_campaign"),
+        )
+        .sort("date")
     )
 
     att_true_agg = (
-        daily.filter(pl.col("in_campaign") == 1)
-             .select(pl.col("tau_sum").mean().alias("att_true_agg"))
+        treated_daily.filter(pl.col("in_campaign") == 1)
+        .select(pl.col("tau_sum").mean().alias("att_true_agg"))
     )
 
-    # log1p truth: log-lift on treated aggregate series
-    att_true_log = (
-        daily.filter(pl.col("in_campaign") == 1)
-             .with_columns(
-                 (pl.col("y_treated_sum").log1p() - pl.col("y_cf_sum").log1p()).alias("log_lift")
-             )
-             .select(pl.col("log_lift").mean().alias("att_true_log1p"))
+    # Log1p truth on aggregate series: mean of log1p(y) - log1p(y0) over campaign dates
+    att_true_log1p = (
+        treated_daily.filter(pl.col("in_campaign") == 1)
+        .with_columns((pl.col("y_obs_sum").log1p() - pl.col("y0_sum").log1p()).alias("dlog1p"))
+        .select(pl.col("dlog1p").mean().alias("att_true_log1p"))
     )
 
-    out = pl.concat([att_true_unit, att_true_agg, att_true_log], how="horizontal").with_columns((pl.col("att_true_log1p").exp() - 1.0).alias("att_true_pct"))
+    out = att_true_unit.join(att_true_agg, how="cross").join(att_true_log1p, how="cross")
+
+    # Percent lift implied by log1p ATT
+    out = out.with_columns(
+        pl.col("att_true_log1p")
+        .map_elements(
+            lambda x: float(np.expm1(x)) if x is not None else None,
+            return_dtype=pl.Float64,
+        )
+        .alias("att_true_pct")
+    )
+
     return out
 
 
@@ -86,37 +90,41 @@ def main():
 
     campaigns = sorted(results["campaign_id"].unique().to_list())
 
-    rows = []
+    rows: list[dict] = []
     for cid in campaigns:
         gt_c = gt.filter(pl.col("campaign_id") == cid)
         truth = compute_truth(gt_c)
-        t_unit = float(truth["att_true_unit"][0])
-        t_agg = float(truth["att_true_agg"][0])
-        t_log = float(truth["att_true_log1p"][0])
-        t_pct = float(truth["att_true_pct"][0])
+
+        t_unit = truth.select("att_true_unit").item()
+        t_agg = truth.select("att_true_agg").item()
+        t_log = truth.select("att_true_log1p").item()
+        t_pct = truth.select("att_true_pct").item()
+
+        if t_unit is None or t_agg is None or t_log is None:
+            raise ValueError(f"Truth contains nulls for campaign_id={cid}: {truth}")
 
         res_c = results.filter(pl.col("campaign_id") == cid)
 
         for r in res_c.iter_rows(named=True):
-            method = r.get("method")
+            method = r.get("method") or ""
             scale = choose_scale(method)
 
             # pick method estimate to evaluate
             if scale == "log1p_att" and r.get("att_hat_fit") is not None:
                 att_hat_used = float(r["att_hat_fit"])
-                att_true_used = t_log
+                att_true_used = float(t_log)
                 truth_label = "log1p_att"
             elif scale == "agg_units_att":
                 att_hat_used = float(r["att_hat"])
-                att_true_used = t_agg
+                att_true_used = float(t_agg)
                 truth_label = "agg_units_att"
             else:
                 att_hat_used = float(r["att_hat"])
-                att_true_used = t_unit
+                att_true_used = float(t_unit)
                 truth_label = "unit_att"
 
             bias = att_hat_used - att_true_used
-            rel_bias = bias / att_true_used if att_true_used != 0 else None
+            rel_bias = (bias / att_true_used) if att_true_used != 0 else None
 
             rows.append({
                 "campaign_id": cid,
@@ -126,17 +134,20 @@ def main():
                 "att_true_used": att_true_used,
                 "bias": bias,
                 "rel_bias": rel_bias,
-                # include diagnostics if present
+                # diagnostics if present
                 "rmse_pre": r.get("rmse_pre"),
                 "pretrend_p": r.get("pretrend_p"),
-                # truth summary (handy for dashboard)
+                # truth summary
                 "att_true_unit": t_unit,
                 "att_true_agg": t_agg,
                 "att_true_log1p": t_log,
                 "att_true_pct": t_pct,
-                # if method row has pct, keep it
+                # keep method pct if present
                 "att_hat_pct": r.get("att_hat_pct"),
             })
+
+    if not rows:
+        raise ValueError("No evaluation rows produced (empty results?).")
 
     out = pl.DataFrame(rows).sort(["campaign_id", "method"])
     out_path = processed / "fact_method_eval.parquet"

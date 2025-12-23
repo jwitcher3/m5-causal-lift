@@ -88,16 +88,19 @@ if best_did_row is not None:
 
 if ev is not None:
     best = (
-        ev.filter(
-            (pl.col("method").str.contains("^scm_"))
-            & (pl.col("truth_used") == "log1p_att")
-            & (~pl.col("method").str.contains("simplex"))
-        )
-        .sort("abs_bias")
+    ev.filter(
+        (pl.col("method").str.contains("^scm_"))
+        & (pl.col("truth_used") == "log1p_att")
+        & (~pl.col("method").str.contains("simplex"))
     )
-    if best.height > 0:
-        best_scm_row = best.row(0, named=True)
-        best_scm_method = best_scm_row["method"]
+    .filter(~pl.col("method").str.contains("log1p_sim"))  # <-- add this
+    .sort("abs_bias")
+)
+
+if best.height > 0:
+    best_scm_row = best.row(0, named=True)
+    best_scm_method = best_scm_row["method"]
+
 
 st.sidebar.subheader("SCM selection")
 auto_pick = st.sidebar.checkbox("Auto-pick best SCM (from eval)", value=True)
