@@ -123,27 +123,6 @@ st.subheader("Method results")
 res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
 st.dataframe(res_show.to_pandas(), use_container_width=True)
 
-st.sidebar.subheader("SCM series")
-series_options = [
-    f"scm_series_{campaign_id}_store.parquet",
-    f"scm_series_{campaign_id}_store_dept.parquet",
-    f"scm_series_{campaign_id}_store_dept_log1p.parquet",
-]
-series_file = st.sidebar.selectbox("series file", series_options, index=min(2, len(series_options)-1))
-series_path = processed_dir / series_file
-
-if series_path.exists():
-    ts = pl.read_parquet(series_path).sort("date")
-    ts_pd = ts.to_pandas().set_index("date")
-
-    st.subheader("Treated vs counterfactual")
-    st.line_chart(ts_pd[["y_treated", "y0_hat"]], use_container_width=True)
-
-    st.subheader("Estimated lift over time")
-    st.line_chart(ts_pd[["lift_hat"]], use_container_width=True)
-else:
-    st.warning(f"Missing {series_path}. Run synth_control.py to generate this series file.")
-
 es_path = processed_dir / f"event_study_{campaign_id}.parquet"
 st.subheader("Event study (optional)")
 if es_path.exists():
