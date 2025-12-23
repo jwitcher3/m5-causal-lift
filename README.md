@@ -1,12 +1,13 @@
-# m5-causal-lift
+# M5 Causal Lift (Incrementality Sandbox)
 
-Portfolio project: simulate synthetic ecommerce campaigns on M5 data (ground-truth lift),
-estimate lift with DiD/event study + synthetic control, and evaluate vs truth.
+End-to-end portfolio project using the M5 Forecasting dataset as a base, with simulated campaigns (ground-truth lift),
+DiD/Event Study, and Synthetic Control, evaluated against the simulator.
 
-## Setup
-pip install "polars[all]" pyarrow
+## Quickstart
 
-## Build processed tables
-Put `calendar.csv` and `sales_train_validation.csv` in `data/raw/`, then run:
-
-python src/m5lift/io/build_processed.py --raw_dir data/raw --out_dir data/processed --grain store_dept
+```bash
+make help
+make install
+make pipeline
+make app
+'''
