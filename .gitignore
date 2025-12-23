@@ -17,3 +17,15 @@ __pycache__/
 # OS/editor
 .DS_Store
 .vscode/
+
+# data outputs
+data/processed/
+data/raw/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# streamlit
+.streamlit/
