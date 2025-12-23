@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from scipy.stats import chi2
 import argparse
 from pathlib import Path
 import numpy as np
@@ -202,10 +202,9 @@ def main():
     att_true = true_att(df)
     did = twfe_did(df)
     
-es, V, ks = event_study(df)
+    es, V, ks = event_study(df)
 
     # Joint pretrend test on leads (-14..-2)
-    from scipy.stats import chi2
     lead_idx = [i for i,k in enumerate(ks) if (-14 <= k <= -2)]
     if len(lead_idx) > 0:
         b = es.select("beta").to_numpy().reshape(-1)

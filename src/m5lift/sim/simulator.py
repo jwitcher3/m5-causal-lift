@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from datetime import datetime
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,6 +58,10 @@ def simulate_campaign(
 
     # Keys by grain
     keys = ["store_id", "dept_id"] if grain == "store_dept" else ["store_id", "item_id"]
+    start_dt = datetime.fromisoformat(spec.start_date).date()
+    end_dt = datetime.fromisoformat(spec.end_date).date()
+    total_days = (end_dt - start_dt).days + 1
+
 
     df = pl.read_parquet(features_path)
 
@@ -187,7 +191,7 @@ def simulate_campaign(
     gt.write_parquet(out_dir / "fact_ground_truth.parquet")
 
     # Print quick summary
-    post_mask = (gt["date"] >= pl.date(spec.start_date)) & (gt["date"] <= pl.date(spec.end_date))
+    post_mask = (gt["date"] >= start_dt) & (gt["date"] <= end_dt)
     treated_mask = gt["treated"] == 1
     att_true = gt.filter(post_mask & treated_mask).select(pl.mean("tau")).item()
     print(f"Campaign {spec.campaign_id}: treated_units={n_treated:,}/{n_units:,} true_ATT(mean tau in-campaign)={att_true:.4f}")
