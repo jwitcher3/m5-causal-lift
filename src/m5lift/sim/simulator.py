@@ -181,20 +181,60 @@ def simulate_campaign(
     )
     treat_panel.write_parquet(out_dir / "fact_treatment_panel.parquet")
 
-    # Ground truth panel
-    gt = df.select(
-        keys
-        + ["date", "mu0", "tau", "y_obs", "y0_draw", "treated", "in_campaign", "rel_day"]
-    ).with_columns(
-        pl.lit(spec.campaign_id).alias("campaign_id")
+    # Ground truth panel (append across campaigns)
+    gt = (
+        df.select(
+            keys
+            + ["date", "mu0", "tau", "y_obs", "y0_draw", "treated", "in_campaign", "rel_day"]
+        )
+        .with_columns(pl.lit(spec.campaign_id).alias("campaign_id"))
     )
-    gt.write_parquet(out_dir / "fact_ground_truth.parquet")
+
+    gt_path = out_dir / "fact_ground_truth.parquet"
+
+    def _align_columns(prev: pl.DataFrame, cur: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
+        prev_schema = prev.schema
+        cur_schema = cur.schema
+        all_cols = sorted(set(prev_schema) | set(cur_schema))
+        target = {c: (cur_schema.get(c) or prev_schema.get(c) or pl.Null) for c in all_cols}
+
+        def coerce(df: pl.DataFrame, schema: dict) -> pl.DataFrame:
+            for c in all_cols:
+                dt = target[c]
+                if c not in schema:
+                    df = df.with_columns(pl.lit(None).cast(dt).alias(c))
+                else:
+                    if schema[c] == pl.Null and dt != pl.Null:
+                        df = df.with_columns(pl.col(c).cast(dt))
+                    elif schema[c] != dt and dt != pl.Null:
+                        df = df.with_columns(pl.col(c).cast(dt))
+            return df.select(all_cols)
+
+        return coerce(prev, prev_schema), coerce(cur, cur_schema)
+
+    # Dedupe key = campaign_id + unit keys + date
+    subset = ["campaign_id"] + keys + ["date"]
+
+    if gt_path.exists():
+        prev = pl.read_parquet(gt_path)
+        prev2, cur2 = _align_columns(prev, gt)
+        combined = (
+            pl.concat([prev2, cur2], how="vertical")
+            .unique(subset=subset, keep="last")
+        )
+        combined.write_parquet(gt_path)
+    else:
+        gt.write_parquet(gt_path)
+
 
     # Print quick summary
     post_mask = (gt["date"] >= start_dt) & (gt["date"] <= end_dt)
     treated_mask = gt["treated"] == 1
     att_true = gt.filter(post_mask & treated_mask).select(pl.mean("tau")).item()
-    print(f"Campaign {spec.campaign_id}: treated_units={n_treated:,}/{n_units:,} true_ATT(mean tau in-campaign)={att_true:.4f}")
+    print(
+        f"Campaign {spec.campaign_id}: treated_units={n_treated:,}/{n_units:,} "
+        f"true_ATT(mean tau in-campaign)={att_true:.4f}"
+    )
 
 
 def main():
