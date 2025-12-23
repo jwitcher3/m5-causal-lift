@@ -1,0 +1,7 @@
+polars
+numpy
+pandas
+streamlit
+altair
+statsmodels
+scipy
