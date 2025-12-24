@@ -25,6 +25,24 @@ results = pl.read_parquet(results_path)
 campaigns = sorted(results["campaign_id"].unique().to_list())
 campaign_id = st.sidebar.selectbox("campaign_id", campaigns, index=0)
 
+st.sidebar.subheader("Experiment runner")
+
+new_cid = st.sidebar.text_input("new_campaign_id", "cmp_003")
+start_str = st.sidebar.text_input("start_date (YYYY-MM-DD)", "2014-08-01")
+end_str = st.sidebar.text_input("end_date (YYYY-MM-DD)", "2014-08-28")
+treat_frac = st.sidebar.slider("treat_frac", 0.05, 0.50, 0.20, 0.05)
+max_uplift = st.sidebar.slider("max_uplift", 0.01, 0.30, 0.15, 0.01)
+seed = st.sidebar.number_input("seed", min_value=1, max_value=10_000, value=7)
+
+cmds = f"""# Run a fresh campaign end-to-end
+make simulate CAMPAIGN_ID={new_cid} START_DATE={start_str} END_DATE={end_str} TREAT_FRAC={treat_frac} MAX_UPLIFT={max_uplift} SEED={seed}
+make did CAMPAIGN_ID={new_cid}
+make scm CAMPAIGN_ID={new_cid} USE_LOG1P=1 DONOR_GRAIN=store_dept ALPHA=50
+make eval
+"""
+st.sidebar.code(cmds, language="bash")
+
+
 # --- Campaign overview (derived from ground truth) ---
 gt_path = processed_dir / "fact_ground_truth.parquet"
 camp_meta = None
@@ -96,10 +114,24 @@ if eval_path.exists():
     ev = ev.with_columns(pl.col("bias").abs().alias("abs_bias"))
 
     st.subheader("Evaluation vs ground truth (scale-aware)")
-    ev_show = ev.filter(~pl.col("method").str.contains("simplex")).sort("abs_bias")
+    #ev_show = ev.filter(~pl.col("method").str.contains("simplex")).sort("abs_bias")
+    ev_show = (
+    ev.filter(~pl.col("method").str.contains("simplex"))
+      .filter(~pl.col("method").str.contains("log1p_sim"))
+      .sort("abs_bias")
+    )   
+
     st.dataframe(ev_show.to_pandas(), use_container_width=True)
 else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
+
+st.subheader("Error summary (abs bias)")
+ev_chart = (
+    ev_show.select(["method", "abs_bias"])
+           .to_pandas()
+           .set_index("method")
+)
+st.bar_chart(ev_chart, use_container_width=True)
 
 
 # --- Pick best SCM + best DiD from eval (so Overview has real values) ---
@@ -236,12 +268,17 @@ res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
 st.dataframe(res_show.to_pandas(), use_container_width=True)
 
 es_path = processed_dir / f"event_study_{campaign_id}.parquet"
-st.subheader("Event study (optional)")
+st.subheader("Event study")
 if es_path.exists():
     es = pl.read_parquet(es_path).sort("rel_day")
+    es_pd = es.to_pandas().set_index("rel_day")
+
+    if "beta" in es_pd.columns:
+        st.line_chart(es_pd[["beta"]], use_container_width=True)
     st.dataframe(es.to_pandas(), use_container_width=True)
 else:
     st.caption(f"No event study file found at {es_path}.")
+
 
 st.subheader("Downloads")
 c1, c2 = st.columns(2)
