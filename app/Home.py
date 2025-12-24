@@ -102,18 +102,30 @@ else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
 
 
-# --- Choose best SCM method automatically (log1p preferred) ---
+# --- Pick best SCM + best DiD from eval (so Overview has real values) ---
 best_scm_method = None
 best_scm_row = None
-
-
-
-# --- Choose best DiD method automatically (unit ATT) ---
 best_did_row = None
-if ev is not None:
+
+if ev is not None and ev.height > 0:
+    # Best SCM (prefer log1p truth; exclude simplex + the known-bad sim row)
+    best_scm = (
+        ev.filter(
+            (pl.col("method").str.contains("^scm_"))
+            & (pl.col("truth_used") == "log1p_att")
+            & (~pl.col("method").str.contains("simplex"))
+            & (~pl.col("method").str.contains("log1p_sim"))
+        )
+        .sort("abs_bias")
+    )
+    if best_scm.height > 0:
+        best_scm_row = best_scm.row(0, named=True)
+        best_scm_method = best_scm_row["method"]
+
+    # Best DiD (unit ATT)
     best_did = (
         ev.filter(
-            (pl.col("method") == "twfe_did")  # tighten if you add more DiD variants later
+            (pl.col("method") == "twfe_did")
             & (pl.col("truth_used") == "unit_att")
         )
         .sort("abs_bias")
@@ -122,23 +134,21 @@ if ev is not None:
         best_did_row = best_did.row(0, named=True)
 
 st.subheader("Overview")
-
 c1, c2, c3, c4 = st.columns(4)
 
 # SCM KPI (percent lift)
 if best_scm_row is not None:
-    true_pct = float(best_scm_row.get("att_true_pct"))
-    est_pct = None
+    true_pct = float(best_scm_row["att_true_pct"])
     if best_scm_row.get("att_hat_pct") is not None:
         est_pct = float(best_scm_row["att_hat_pct"])
-    elif best_scm_row.get("truth_used") == "log1p_att":
+    else:
+        # If evaluated on log1p scale, convert to pct
         est_pct = float(np.expm1(float(best_scm_row["att_hat_used"])))
 
     c1.metric("True lift (%)", f"{true_pct*100:.2f}%")
-    if est_pct is not None:
-        c2.metric("SCM est lift (%)", f"{est_pct*100:.2f}%")
-        c3.metric("SCM error (pp)", f"{(est_pct-true_pct)*100:.2f} pp")
-    c4.metric("SCM method", str(best_scm_row.get("method")))
+    c2.metric("SCM est lift (%)", f"{est_pct*100:.2f}%")
+    c3.metric("SCM error (pp)", f"{(est_pct-true_pct)*100:.2f} pp")
+    c4.metric("SCM method", str(best_scm_row["method"]))
 else:
     c1.metric("True lift (%)", "—")
     c2.metric("SCM est lift (%)", "—")
@@ -147,23 +157,12 @@ else:
 
 # DiD KPI (unit ATT)
 if best_did_row is not None:
-    st.caption(f"DiD (unit ATT): est={best_did_row['att_hat_used']:.2f} vs true={best_did_row['att_true_used']:.2f} (bias={best_did_row['bias']:.2f})")
-
-
-if ev is not None:
-    best = (
-    ev.filter(
-        (pl.col("method").str.contains("^scm_"))
-        & (pl.col("truth_used") == "log1p_att")
-        & (~pl.col("method").str.contains("simplex"))
+    st.caption(
+        f"DiD (unit ATT): est={best_did_row['att_hat_used']:.2f} "
+        f"vs true={best_did_row['att_true_used']:.2f} "
+        f"(bias={best_did_row['bias']:.2f}, pretrend_p={best_did_row.get('pretrend_p')})"
     )
-    .filter(~pl.col("method").str.contains("log1p_sim"))  # <-- add this
-    .sort("abs_bias")
-)
 
-if best.height > 0:
-    best_scm_row = best.row(0, named=True)
-    best_scm_method = best_scm_row["method"]
 
 
 st.sidebar.subheader("SCM selection")
