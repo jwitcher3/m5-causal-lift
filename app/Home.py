@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+import io
+from datetime import date 
 from pathlib import Path
 import polars as pl
 import streamlit as st
@@ -23,6 +24,69 @@ results = pl.read_parquet(results_path)
 
 campaigns = sorted(results["campaign_id"].unique().to_list())
 campaign_id = st.sidebar.selectbox("campaign_id", campaigns, index=0)
+
+# --- Campaign overview (derived from ground truth) ---
+gt_path = processed_dir / "fact_ground_truth.parquet"
+camp_meta = None
+if gt_path.exists():
+    gt_c = (
+        pl.read_parquet(gt_path)
+        .filter(pl.col("campaign_id") == campaign_id)
+        .select(["date", "treated", "in_campaign"])
+        .with_columns(
+            pl.col("date").cast(pl.Date),
+            pl.col("treated").cast(pl.Int8),
+            pl.col("in_campaign").cast(pl.Int8),
+        )
+    )
+
+    # campaign window from in_campaign dates
+    win = gt_c.filter(pl.col("in_campaign") == 1).select(
+        pl.col("date").min().alias("start"),
+        pl.col("date").max().alias("end"),
+    )
+    start_dt = win["start"][0]
+    end_dt = win["end"][0]
+
+    # treated/control unit counts (at selected grain)
+    # infer grain by checking columns in results file naming or just default store_dept
+    # if you want exact: treat unit key is whatever simulator used; for now count by rows grouped in GT is heavy.
+    # simple approximation: count treated rows / unique treated days is not ideal, so keep it light:
+    treated_rows = int(gt_c.filter(pl.col("treated") == 1).height)
+    treated_in_rows = int(gt_c.filter((pl.col("treated") == 1) & (pl.col("in_campaign") == 1)).height)
+
+    camp_meta = {
+        "start": start_dt,
+        "end": end_dt,
+        "treated_rows": treated_rows,
+        "treated_in_campaign_rows": treated_in_rows,
+    }
+
+st.subheader("Campaign overview")
+if camp_meta is None or camp_meta["start"] is None:
+    st.caption("No ground truth found for this campaign (run simulator first).")
+else:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Campaign window", f"{camp_meta['start']} → {camp_meta['end']}")
+    c2.metric("Treated rows", f"{camp_meta['treated_rows']:,}")
+    c3.metric("Treated rows (in-campaign)", f"{camp_meta['treated_in_campaign_rows']:,}")
+
+st.sidebar.subheader("Run commands")
+if camp_meta and camp_meta["start"] and camp_meta["end"]:
+    cmds = f"""# End-to-end for this campaign
+make simulate CAMPAIGN_ID={campaign_id} START_DATE={camp_meta['start']} END_DATE={camp_meta['end']} TREAT_FRAC=0.2 MAX_UPLIFT=0.15 SEED=7
+make did CAMPAIGN_ID={campaign_id}
+make scm CAMPAIGN_ID={campaign_id} USE_LOG1P=1 DONOR_GRAIN=store_dept ALPHA=50
+make eval
+make app
+"""
+else:
+    cmds = """# End-to-end
+make pipeline
+make app
+"""
+st.sidebar.code(cmds, language="bash")
+
 
 # --- Eval table (scale-aware) ---
 eval_path = processed_dir / "fact_method_eval.parquet"
@@ -179,3 +243,26 @@ if es_path.exists():
     st.dataframe(es.to_pandas(), use_container_width=True)
 else:
     st.caption(f"No event study file found at {es_path}.")
+
+st.subheader("Downloads")
+c1, c2 = st.columns(2)
+
+if ev is not None and ev.height > 0:
+    buf = io.StringIO()
+    ev.write_csv(buf)
+    c1.download_button(
+        "Download eval (CSV)",
+        data=buf.getvalue().encode("utf-8"),
+        file_name=f"eval_{campaign_id}.csv",
+        mime="text/csv",
+    )
+
+res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
+buf2 = io.StringIO()
+res_show.write_csv(buf2)
+c2.download_button(
+    "Download method results (CSV)",
+    data=buf2.getvalue().encode("utf-8"),
+    file_name=f"method_results_{campaign_id}.csv",
+    mime="text/csv",
+)
