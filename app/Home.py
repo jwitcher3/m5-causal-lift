@@ -121,7 +121,7 @@ if eval_path.exists():
       .sort("abs_bias")
     )   
 
-    st.dataframe(ev_show.to_pandas(), use_container_width=True)
+    st.dataframe(ev_show.to_pandas(), width="stretch")
 else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
 
@@ -131,9 +131,72 @@ ev_chart = (
            .to_pandas()
            .set_index("method")
 )
-st.bar_chart(ev_chart, use_container_width=True)
+st.bar_chart(ev_chart, width="stretch")
 
 st.subheader("Leaderboard (all campaigns)")
+
+st.subheader("Scorecard (across campaigns)")
+
+all_eval_path = processed_dir / "fact_method_eval.parquet"
+if not all_eval_path.exists():
+    st.caption("No eval table yet. Run: make eval")
+else:
+    all_ev = pl.read_parquet(all_eval_path).with_columns(
+        pl.col("bias").abs().alias("abs_bias"),
+        pl.col("rel_bias").abs().alias("abs_rel_bias"),
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    hide_simplex = st.checkbox("Hide simplex", value=True, key="sc_hide_simplex")
+    hide_sim = st.checkbox("Hide log1p_sim", value=True, key="sc_hide_log1p_sim")
+    min_campaigns = st.number_input("Min campaigns per method", min_value=1, max_value=100, value=1, key="sc_min_campaigns")
+
+
+    if hide_simplex:
+        all_ev = all_ev.filter(~pl.col("method").str.contains("simplex"))
+    if hide_sim:
+        all_ev = all_ev.filter(~pl.col("method").str.contains("log1p_sim"))
+
+    # Winner per campaign (lowest abs_bias)
+    winners = (
+        all_ev.sort(["campaign_id", "abs_bias"])
+        .group_by("campaign_id")
+        .agg(pl.col("method").first().alias("winner_method"))
+    )
+
+    all_ev = all_ev.join(winners, on="campaign_id", how="left").with_columns(
+        (pl.col("method") == pl.col("winner_method")).cast(pl.Int8).alias("is_winner")
+    )
+
+    scorecard = (
+        all_ev.group_by("method")
+        .agg(
+            pl.len().alias("n_rows"),
+            pl.n_unique("campaign_id").alias("n_campaigns"),
+            pl.mean("abs_bias").alias("mean_abs_bias"),
+            pl.median("abs_bias").alias("median_abs_bias"),
+            pl.mean("abs_rel_bias").alias("mean_abs_rel_bias"),
+            pl.mean("is_winner").alias("win_rate"),
+        )
+        .filter(pl.col("n_campaigns") >= min_campaigns)
+        .sort(["mean_abs_bias", "median_abs_bias"])
+    )
+
+    st.dataframe(scorecard.to_pandas(), width="stretch")
+
+    # Quick chart: mean_abs_bias by method
+    chart_df = scorecard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
+    st.bar_chart(chart_df, width="stretch")
+
+    # Optional: winners table
+    with st.expander("Winners by campaign"):
+        st.dataframe(
+            winners.sort("campaign_id").to_pandas(),
+            width="stretch"
+        )
+
+
 
 all_eval_path = processed_dir / "fact_method_eval.parquet"
 if all_eval_path.exists():
@@ -159,10 +222,10 @@ if all_eval_path.exists():
         .sort("mean_abs_bias")
     )
 
-    st.dataframe(leaderboard.to_pandas(), use_container_width=True)
+    st.dataframe(leaderboard.to_pandas(), width="stretch")
 
     lb_chart = leaderboard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(lb_chart, use_container_width=True)
+    st.bar_chart(lb_chart, width="stretch")
 else:
     st.caption("No fact_method_eval.parquet yet. Run: make eval")
 
@@ -178,19 +241,19 @@ diag = diag.filter(
 # show table first
 st.dataframe(
     diag.select(["campaign_id","method","abs_bias","pretrend_p","rmse_pre"]).to_pandas(),
-    use_container_width=True
+    width="stretch"
 )
 
 # simple charts (Streamlit native)
 if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
     pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
     st.caption("Pretrend p-values by method (lower can indicate violation risk)")
-    st.bar_chart(pchart, use_container_width=True)
+    st.bar_chart(pchart, width="stretch")
 
 if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
     rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
     st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
-    st.bar_chart(rchart, use_container_width=True)
+    st.bar_chart(rchart, width="stretch")
 
 st.sidebar.subheader("Campaign sweep")
 n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
@@ -309,10 +372,10 @@ if series_file:
     ts_pd = ts.to_pandas().set_index("date")
 
     st.subheader("Synthetic control: treated vs counterfactual")
-    st.line_chart(ts_pd[["y_treated", "y0_hat"]], use_container_width=True)
+    st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
 
     st.subheader("Synthetic control: estimated lift over time")
-    st.line_chart(ts_pd[["lift_hat"]], use_container_width=True)
+    st.line_chart(ts_pd[["lift_hat"]], width="stretch")
 
     # Metrics (true vs estimated) from eval row if available
     if best_scm_row is not None:
@@ -338,7 +401,7 @@ if series_file:
 
 st.subheader("Method results")
 res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
-st.dataframe(res_show.to_pandas(), use_container_width=True)
+st.dataframe(res_show.to_pandas(), width="stretch")
 
 es_path = processed_dir / f"event_study_{campaign_id}.parquet"
 st.subheader("Event study")
@@ -347,8 +410,8 @@ if es_path.exists():
     es_pd = es.to_pandas().set_index("rel_day")
 
     if "beta" in es_pd.columns:
-        st.line_chart(es_pd[["beta"]], use_container_width=True)
-    st.dataframe(es.to_pandas(), use_container_width=True)
+        st.line_chart(es_pd[["beta"]], width="stretch")
+    st.dataframe(es.to_pandas(), width="stretch")
 else:
     st.caption(f"No event study file found at {es_path}.")
 
