@@ -133,6 +133,79 @@ ev_chart = (
 )
 st.bar_chart(ev_chart, use_container_width=True)
 
+st.subheader("Leaderboard (all campaigns)")
+
+all_eval_path = processed_dir / "fact_method_eval.parquet"
+if all_eval_path.exists():
+    all_ev = pl.read_parquet(all_eval_path).with_columns(pl.col("bias").abs().alias("abs_bias"))
+
+    # optional filters (keeps it clean)
+    hide_simplex = st.checkbox("Hide simplex", value=True)
+    hide_sim = st.checkbox("Hide log1p_sim rows", value=True)
+
+    if hide_simplex:
+        all_ev = all_ev.filter(~pl.col("method").str.contains("simplex"))
+    if hide_sim:
+        all_ev = all_ev.filter(~pl.col("method").str.contains("log1p_sim"))
+
+    leaderboard = (
+        all_ev.group_by("method")
+        .agg(
+            pl.len().alias("n_campaigns"),
+            pl.mean("abs_bias").alias("mean_abs_bias"),
+            pl.median("abs_bias").alias("median_abs_bias"),
+            pl.mean("rel_bias").alias("mean_rel_bias"),
+        )
+        .sort("mean_abs_bias")
+    )
+
+    st.dataframe(leaderboard.to_pandas(), use_container_width=True)
+
+    lb_chart = leaderboard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
+    st.bar_chart(lb_chart, use_container_width=True)
+else:
+    st.caption("No fact_method_eval.parquet yet. Run: make eval")
+
+st.subheader("Diagnostics (where available)")
+
+diag = pl.read_parquet(all_eval_path)
+
+# keep only rows with diagnostics
+diag = diag.filter(
+    (pl.col("pretrend_p").is_not_null()) | (pl.col("rmse_pre").is_not_null())
+).with_columns(pl.col("bias").abs().alias("abs_bias"))
+
+# show table first
+st.dataframe(
+    diag.select(["campaign_id","method","abs_bias","pretrend_p","rmse_pre"]).to_pandas(),
+    use_container_width=True
+)
+
+# simple charts (Streamlit native)
+if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
+    pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
+    st.caption("Pretrend p-values by method (lower can indicate violation risk)")
+    st.bar_chart(pchart, use_container_width=True)
+
+if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
+    rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
+    st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
+    st.bar_chart(rchart, use_container_width=True)
+
+st.sidebar.subheader("Campaign sweep")
+n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
+base_seed = st.sidebar.number_input("base_seed", 1, 10000, 100)
+
+sweep = "\n".join([
+    f"make simulate CAMPAIGN_ID=cmp_{i:03d} START_DATE={start_str} END_DATE={end_str} "
+    f"TREAT_FRAC={treat_frac} MAX_UPLIFT={max_uplift} SEED={base_seed+i}\n"
+    f"make did CAMPAIGN_ID=cmp_{i:03d}\n"
+    f"make scm CAMPAIGN_ID=cmp_{i:03d} USE_LOG1P=1 DONOR_GRAIN=store_dept ALPHA=50\n"
+    for i in range(1, n+1)
+]) + "\nmake eval"
+
+st.sidebar.code(sweep, language="bash")
+
 
 # --- Pick best SCM + best DiD from eval (so Overview has real values) ---
 best_scm_method = None
