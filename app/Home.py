@@ -6,6 +6,71 @@ import polars as pl
 import streamlit as st
 import numpy as np
 
+def safe_float(x):
+    try:
+        return None if x is None else float(x)
+    except Exception:
+        return None
+
+def grade_from_flags(n_flags: int) -> str:
+    if n_flags <= 0:
+        return "A"
+    if n_flags == 1:
+        return "B"
+    return "C"
+
+def recommendation_from_grade(g: str) -> str:
+    return {"A": "Ship", "B": "Monitor", "C": "Don’t ship"}.get(g, "Monitor")
+
+def compute_scm_stability(ts: pl.DataFrame, lift_col: str = "lift_hat_units") -> dict:
+    inc = ts.filter(pl.col("in_campaign") == 1)
+    if inc.height == 0 or lift_col not in inc.columns:
+        return {"lift_mean": None, "lift_std": None, "cv": None}
+
+    lift_mean = safe_float(inc.select(pl.col(lift_col).mean()).item())
+    lift_std  = safe_float(inc.select(pl.col(lift_col).std()).item())
+    denom = abs(lift_mean) if lift_mean is not None and abs(lift_mean) > 1e-9 else None
+    cv = (lift_std / denom) if (lift_std is not None and denom is not None) else None
+    return {"lift_mean": lift_mean, "lift_std": lift_std, "cv": cv}
+
+
+def grade_scm(rmse_pre: float | None, cv: float | None) -> tuple[str, list[str]]:
+    """
+    Simple retail-friendly guardrails.
+    - rmse_pre is on fit scale (log1p) if you ran log1p SCM, otherwise units.
+    """
+    flags = []
+    # thresholds you can tune after you see a few campaigns
+    if rmse_pre is None:
+        flags.append("Missing pre-fit metric (rmse_pre).")
+    else:
+        # log1p rmse is typically ~0.05–0.35 in your runs
+        if rmse_pre > 0.35:
+            flags.append(f"Weak pre-fit (rmse_pre={rmse_pre:.3f}).")
+
+    if cv is None:
+        flags.append("Missing stability metric (CV).")
+    else:
+        if cv > 2.0:
+            flags.append(f"Unstable daily lift (CV={cv:.2f}).")
+
+    g = grade_from_flags(len(flags))
+    return g, flags
+
+def grade_did(pretrend_p: float | None) -> tuple[str, list[str]]:
+    flags = []
+    if pretrend_p is None:
+        flags.append("Missing pre-trend test (pretrend_p).")
+    else:
+        if pretrend_p < 0.05:
+            flags.append(f"Pre-trend violation risk (p={pretrend_p:.3f}).")
+        elif pretrend_p < 0.10:
+            flags.append(f"Borderline pre-trend (p={pretrend_p:.3f}).")
+
+    g = grade_from_flags(len(flags))
+    return g, flags
+
+
 st.set_page_config(page_title="M5 Causal Lift", layout="wide")
 
 DEFAULT_PROCESSED = Path("data/processed")
@@ -109,6 +174,8 @@ st.sidebar.code(cmds, language="bash")
 # --- Eval table (scale-aware) ---
 eval_path = processed_dir / "fact_method_eval.parquet"
 ev = None
+ev_show = None
+
 if eval_path.exists():
     ev = pl.read_parquet(eval_path).filter(pl.col("campaign_id") == campaign_id)
     ev = ev.with_columns(pl.col("bias").abs().alias("abs_bias"))
@@ -126,14 +193,12 @@ else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
 
 st.subheader("Error summary (abs bias)")
-ev_chart = (
-    ev_show.select(["method", "abs_bias"])
-           .to_pandas()
-           .set_index("method")
-)
-st.bar_chart(ev_chart, width="stretch")
+if ev_show is None or ev_show.height == 0:
+    st.caption("No eval rows to chart yet. Run: make eval")
+else:
+    ev_chart = ev_show.select(["method", "abs_bias"]).to_pandas().set_index("method")
+    st.bar_chart(ev_chart, width="stretch")
 
-st.subheader("Leaderboard (all campaigns)")
 
 st.subheader("Scorecard (across campaigns)")
 
@@ -197,77 +262,44 @@ else:
         )
 
 
+st.subheader("Diagnostics (where available)")
+if not all_eval_path.exists():
+    st.caption("No eval table yet. Run: make eval")
+else:
+    diag = pl.read_parquet(all_eval_path)
+    diag = diag.filter(
+        (pl.col("pretrend_p").is_not_null()) | (pl.col("rmse_pre").is_not_null())
+    ).with_columns(pl.col("bias").abs().alias("abs_bias"))
 
-all_eval_path = processed_dir / "fact_method_eval.parquet"
-if all_eval_path.exists():
-    all_ev = pl.read_parquet(all_eval_path).with_columns(pl.col("bias").abs().alias("abs_bias"))
-
-    # optional filters (keeps it clean)
-    hide_simplex = st.checkbox("Hide simplex", value=True)
-    hide_sim = st.checkbox("Hide log1p_sim rows", value=True)
-
-    if hide_simplex:
-        all_ev = all_ev.filter(~pl.col("method").str.contains("simplex"))
-    if hide_sim:
-        all_ev = all_ev.filter(~pl.col("method").str.contains("log1p_sim"))
-
-    leaderboard = (
-        all_ev.group_by("method")
-        .agg(
-            pl.len().alias("n_campaigns"),
-            pl.mean("abs_bias").alias("mean_abs_bias"),
-            pl.median("abs_bias").alias("median_abs_bias"),
-            pl.mean("rel_bias").alias("mean_rel_bias"),
-        )
-        .sort("mean_abs_bias")
+    st.dataframe(
+        diag.select(["campaign_id","method","abs_bias","pretrend_p","rmse_pre"]).to_pandas(),
+        width="stretch"
     )
 
-    st.dataframe(leaderboard.to_pandas(), width="stretch")
-
-    lb_chart = leaderboard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(lb_chart, width="stretch")
-else:
-    st.caption("No fact_method_eval.parquet yet. Run: make eval")
-
-st.subheader("Diagnostics (where available)")
-
-diag = pl.read_parquet(all_eval_path)
-
-# keep only rows with diagnostics
-diag = diag.filter(
-    (pl.col("pretrend_p").is_not_null()) | (pl.col("rmse_pre").is_not_null())
-).with_columns(pl.col("bias").abs().alias("abs_bias"))
-
-# show table first
-st.dataframe(
-    diag.select(["campaign_id","method","abs_bias","pretrend_p","rmse_pre"]).to_pandas(),
-    width="stretch"
-)
-
 # simple charts (Streamlit native)
-if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
-    pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
-    st.caption("Pretrend p-values by method (lower can indicate violation risk)")
-    st.bar_chart(pchart, width="stretch")
+    if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
+        pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
+        st.caption("Pretrend p-values by method (lower can indicate violation risk)")
+        st.bar_chart(pchart, width="stretch")
 
-if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
-    rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
-    st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
-    st.bar_chart(rchart, width="stretch")
+    if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
+        rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
+        st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
+        st.bar_chart(rchart, width="stretch")
 
-st.sidebar.subheader("Campaign sweep")
-n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
-base_seed = st.sidebar.number_input("base_seed", 1, 10000, 100)
+    st.sidebar.subheader("Campaign sweep")
+    n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
+    base_seed = st.sidebar.number_input("base_seed", 1, 10000, 100)
 
-sweep = "\n".join([
-    f"make simulate CAMPAIGN_ID=cmp_{i:03d} START_DATE={start_str} END_DATE={end_str} "
-    f"TREAT_FRAC={treat_frac} MAX_UPLIFT={max_uplift} SEED={base_seed+i}\n"
-    f"make did CAMPAIGN_ID=cmp_{i:03d}\n"
-    f"make scm CAMPAIGN_ID=cmp_{i:03d} USE_LOG1P=1 DONOR_GRAIN=store_dept ALPHA=50\n"
-    for i in range(1, n+1)
-]) + "\nmake eval"
+    sweep = "\n".join([
+        f"make simulate CAMPAIGN_ID=cmp_{i:03d} START_DATE={start_str} END_DATE={end_str} "
+        f"TREAT_FRAC={treat_frac} MAX_UPLIFT={max_uplift} SEED={base_seed+i}\n"
+        f"make did CAMPAIGN_ID=cmp_{i:03d}\n"
+        f"make scm CAMPAIGN_ID=cmp_{i:03d} USE_LOG1P=1 DONOR_GRAIN=store_dept ALPHA=50\n"
+        for i in range(1, n+1)
+    ]) + "\nmake eval"
 
-st.sidebar.code(sweep, language="bash")
+    st.sidebar.code(sweep, language="bash")
 
 
 # --- Pick best SCM + best DiD from eval (so Overview has real values) ---
@@ -364,12 +396,14 @@ else:
         default_idx = series_candidates.index(picked_series)
 
     series_file = st.sidebar.selectbox("SCM series file", series_candidates, index=default_idx)
-
+ts = None
 # --- Plot SCM series + show lift metrics ---
 if series_file:
     series_path = processed_dir / series_file
     ts = pl.read_parquet(series_path).sort("date")
     ts_pd = ts.to_pandas().set_index("date")
+    lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
+
 
     st.subheader("Synthetic control: treated vs counterfactual")
     st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
@@ -397,6 +431,41 @@ if series_file:
             c3.metric("Error (pp)", f"{(est_pct-true_pct)*100:.2f} pp")
 
 
+
+st.subheader("Decision (units)")
+
+scm_rmse = safe_float(best_scm_row.get("rmse_pre")) if best_scm_row else None
+did_p = safe_float(best_did_row.get("pretrend_p")) if best_did_row else None
+
+# Default stability unknown until we have ts
+scm_cv = None
+scm_stability = None
+
+if ts is not None:
+    scm_stability = compute_scm_stability(ts, lift_col=lift_col)
+    scm_cv = scm_stability["cv"]
+
+# Grade once (after stability computed if available)
+scm_grade, scm_flags = grade_scm(scm_rmse, scm_cv)
+did_grade, did_flags = grade_did(did_p)
+
+c1, c2, c3 = st.columns(3)
+c1.metric("SCM confidence", f"{scm_grade} — {recommendation_from_grade(scm_grade)}")
+c2.metric("DiD confidence", f"{did_grade} — {recommendation_from_grade(did_grade)}")
+c3.metric("Primary KPI", "Units")
+
+if scm_flags:
+    st.warning("SCM checks:\n- " + "\n- ".join(scm_flags))
+if did_flags:
+    st.warning("DiD checks:\n- " + "\n- ".join(did_flags))
+
+if scm_stability and scm_stability["cv"] is not None:
+    st.caption(
+        f"SCM stability (in-campaign): mean lift={scm_stability['lift_mean']:.2f} units, "
+        f"std={scm_stability['lift_std']:.2f}, CV={scm_stability['cv']:.2f}"
+    )
+else:
+    st.caption("SCM stability: not available (missing series or no in-campaign days).")
 
 
 st.subheader("Method results")
@@ -428,6 +497,42 @@ if ev is not None and ev.height > 0:
         file_name=f"eval_{campaign_id}.csv",
         mime="text/csv",
     )
+
+st.subheader("Method health metrics (rmse + pretrend)")
+
+if ev is None:
+    st.caption("Run eval first (make eval).")
+else:
+    # Use the eval table across all campaigns (load full eval file)
+    ev_all = pl.read_parquet(eval_path)
+
+    # Filter out method variants you don’t want to rank
+    ev_all = (
+        ev_all
+        .filter(~pl.col("method").str.contains("simplex"))
+        .filter(~pl.col("method").str.contains("log1p_sim"))
+    )
+
+    # Build a method-level leaderboard:
+    # - SCM: avg rmse_pre (lower better)
+    # - DiD: share with pretrend_p >= 0.10 (higher better)
+    # - Coverage: number of campaigns where method exists
+    leaderboard = (
+        ev_all.group_by("method")
+        .agg(
+            pl.len().alias("n_campaigns"),
+            pl.col("rmse_pre").mean().alias("rmse_pre_avg"),
+            (pl.col("pretrend_p") >= 0.10).mean().alias("pretrend_pass_rate"),
+        )
+        .with_columns(
+            pl.col("rmse_pre_avg").fill_null(999.0),
+            pl.col("pretrend_pass_rate").fill_null(0.0),
+        )
+        .sort(["n_campaigns", "rmse_pre_avg"], descending=[True, False])
+    )
+
+    st.dataframe(leaderboard.to_pandas(), width="stretch")
+
 
 res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
 buf2 = io.StringIO()
