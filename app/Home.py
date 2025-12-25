@@ -397,41 +397,32 @@ else:
 
     series_file = st.sidebar.selectbox("SCM series file", series_candidates, index=default_idx)
 
-ts = None
-lift_col = "lift_hat_units"  # default
-if series_file:
-    ...
-    lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
-
 # --- Plot SCM series + show lift metrics ---
 ts = None
-lift_col = "lift_hat"  # default
+lift_col = "lift_hat"  # safe default
 
-# --- Plot SCM series + show lift metrics ---
 if series_file:
     series_path = processed_dir / series_file
     ts = pl.read_parquet(series_path).sort("date")
     ts_pd = ts.to_pandas().set_index("date")
 
+    # choose which lift column exists in the parquet
     lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
 
     st.subheader("Synthetic control: treated vs counterfactual")
     st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
 
     st.subheader("Synthetic control: estimated lift over time")
-    plot_col = lift_col if lift_col in ts_pd.columns else "lift_hat"
-    st.line_chart(ts_pd[[plot_col]], width="stretch")
-    
+    st.line_chart(ts_pd[[lift_col]], width="stretch")
+
     # Metrics (true vs estimated) from eval row if available
     if best_scm_row is not None:
         true_pct = float(best_scm_row.get("att_true_pct"))
         est_pct = None
 
-        # prefer att_hat_pct if present; else compute from att_hat_used on log scale
         if best_scm_row.get("att_hat_pct") is not None:
             est_pct = float(best_scm_row["att_hat_pct"])
         else:
-            # If this row is log1p_att, att_hat_used is log-lift
             if best_scm_row.get("truth_used") == "log1p_att":
                 est_pct = float(np.expm1(float(best_scm_row["att_hat_used"])))
 
