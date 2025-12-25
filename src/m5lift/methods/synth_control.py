@@ -169,10 +169,11 @@ def main() -> None:
 
     # Save series for dashboard
     ts = (
-        panel.select(["date", "y_treated", "in_campaign"])
-        .with_columns(pl.Series("y0_hat", y0_hat.tolist()).cast(pl.Float64))
-        .with_columns((pl.col("y_treated") - pl.col("y0_hat")).alias("lift_hat"))
-    )
+    panel.select(["date", "y_treated", "in_campaign"])
+    .with_columns(pl.Series("y0_hat", y0_hat.tolist()).cast(pl.Float64))
+    .with_columns((pl.col("y_treated") - pl.col("y0_hat")).alias("lift_hat_units"))
+    .with_columns(pl.col("lift_hat_units").alias("lift_hat"))  # backwards-compatible alias
+)
 
     series_name = f"scm_series_{args.campaign_id}_{args.donor_grain}" + ("_log1p" if args.use_log1p else "") + ".parquet"
     ts.write_parquet(processed / series_name)

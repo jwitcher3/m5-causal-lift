@@ -396,7 +396,13 @@ else:
         default_idx = series_candidates.index(picked_series)
 
     series_file = st.sidebar.selectbox("SCM series file", series_candidates, index=default_idx)
+
 ts = None
+lift_col = "lift_hat_units"  # default
+if series_file:
+    ...
+    lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
+
 # --- Plot SCM series + show lift metrics ---
 if series_file:
     series_path = processed_dir / series_file
@@ -409,7 +415,7 @@ if series_file:
     st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
 
     st.subheader("Synthetic control: estimated lift over time")
-    st.line_chart(ts_pd[["lift_hat"]], width="stretch")
+    st.line_chart(ts_pd[[lift_col]], width="stretch")
 
     # Metrics (true vs estimated) from eval row if available
     if best_scm_row is not None:
