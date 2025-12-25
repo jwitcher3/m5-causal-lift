@@ -404,19 +404,24 @@ if series_file:
     lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
 
 # --- Plot SCM series + show lift metrics ---
+ts = None
+lift_col = "lift_hat"  # default
+
+# --- Plot SCM series + show lift metrics ---
 if series_file:
     series_path = processed_dir / series_file
     ts = pl.read_parquet(series_path).sort("date")
     ts_pd = ts.to_pandas().set_index("date")
-    lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
 
+    lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
 
     st.subheader("Synthetic control: treated vs counterfactual")
     st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
 
     st.subheader("Synthetic control: estimated lift over time")
-    st.line_chart(ts_pd[[lift_col]], width="stretch")
-
+    plot_col = lift_col if lift_col in ts_pd.columns else "lift_hat"
+    st.line_chart(ts_pd[[plot_col]], width="stretch")
+    
     # Metrics (true vs estimated) from eval row if available
     if best_scm_row is not None:
         true_pct = float(best_scm_row.get("att_true_pct"))
