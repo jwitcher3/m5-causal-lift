@@ -121,8 +121,34 @@ def main() -> None:
     y_pre = y_all_fit[pre_mask]
     X_pre = X_all_fit[pre_mask, :]
 
+  # RMSE on fit scale (pre-period) ... (leave later)
+
+    method = f"scm_ridge_{args.donor_grain}" + ("_log1p" if args.use_log1p else "")
+
+
     # Fit ridge weights on pre-period
     w = _ridge_weights(X_pre, y_pre, alpha=args.alpha)
+
+# --- Save donor weights for interpretability ---
+    weights_df = pl.DataFrame(
+        {
+            "campaign_id": [args.campaign_id] * len(donor_cols),
+            "method": [method] * len(donor_cols),  # NOTE: method defined below currently
+            "donor_id": donor_cols,
+            "weight": w.astype(float).tolist(),
+            "alpha": [float(args.alpha)] * len(donor_cols),
+            "fit_scale": [fit_scale] * len(donor_cols),
+            "donor_grain": [args.donor_grain] * len(donor_cols),
+            "use_log1p": [bool(args.use_log1p)] * len(donor_cols),
+        }
+    )
+
+    weights_name = (
+        f"scm_weights_{args.campaign_id}_{args.donor_grain}"
+        + ("_log1p" if args.use_log1p else "")
+        + ".parquet"
+    )
+    weights_df.write_parquet(processed / weights_name)
 
     # Predict counterfactual on fit scale then invert if needed
     y0_hat_fit = X_all_fit @ w
@@ -140,7 +166,6 @@ def main() -> None:
     # RMSE on fit scale (pre-period)
     rmse_pre = float(np.sqrt(np.mean((y_pre - (X_pre @ w)) ** 2)))
 
-    method = f"scm_ridge_{args.donor_grain}" + ("_log1p" if args.use_log1p else "")
 
     res = pl.DataFrame([{
         "campaign_id": args.campaign_id,

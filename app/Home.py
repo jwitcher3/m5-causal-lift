@@ -432,6 +432,38 @@ if series_file:
             c2.metric("Estimated lift (%), SCM", f"{est_pct*100:.2f}%")
             c3.metric("Error (pp)", f"{(est_pct-true_pct)*100:.2f} pp")
 
+    # --- Donor weights (if available) ---
+    # infer weights filename from the selected series_file name
+    # e.g. scm_series_cmp_001_store_dept_log1p.parquet -> scm_weights_cmp_001_store_dept_log1p.parquet
+    weights_file = series_file.replace("scm_series_", "scm_weights_")
+    weights_path = processed_dir / weights_file
+
+    with st.expander("SCM donor weights (interpretability)", expanded=False):
+        if weights_path.exists():
+            wdf = pl.read_parquet(weights_path)
+
+            # helpful derived fields
+            wdf = wdf.with_columns(
+                pl.col("weight").abs().alias("abs_weight")
+            ).sort("abs_weight", descending=True)
+
+            top_n = st.slider("Show top N donors", 5, 50, 15)
+
+            st.dataframe(
+                wdf.select(["donor_id", "weight", "abs_weight"]).head(top_n).to_pandas(),
+                width="stretch"
+            )
+
+            # quick chart
+            wchart = (
+                wdf.select(["donor_id", "abs_weight"])
+                   .head(top_n)
+                   .to_pandas()
+                   .set_index("donor_id")
+            )
+            st.bar_chart(wchart, width="stretch")
+        else:
+            st.caption(f"No weights file found at {weights_path.name}. Re-run: make scm CAMPAIGN_ID={campaign_id} ...")
 
 
 st.subheader("Decision (units)")
