@@ -53,6 +53,5 @@ It simulates a campaign (treatment vs control) and evaluates causal methods agai
 - No weights file → rerun SCM after this feature was added.
 
 ---
-Tip: Keep this page lightweight. The README can hold deeper documentation later.
 """
 )
