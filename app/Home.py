@@ -447,7 +447,7 @@ if series_file:
                 pl.col("weight").abs().alias("abs_weight")
             ).sort("abs_weight", descending=True)
 
-            top_n = st.slider("Show top N donors", 5, 50, 15)
+            top_n = st.slider("Show top N donors", 5, 50, 15, key="scm_top_n_donors")
 
             st.dataframe(
                 wdf.select(["donor_id", "weight", "abs_weight"]).head(top_n).to_pandas(),
