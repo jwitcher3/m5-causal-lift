@@ -188,7 +188,7 @@ if eval_path.exists():
       .sort("abs_bias")
     )   
 
-    st.dataframe(ev_show.to_pandas(), width="stretch")
+    st.dataframe(ev_show.to_pandas(), use_container_width=True)
 else:
     st.caption("No eval table found. Run: python src/m5lift/eval/evaluate.py")
 
@@ -197,7 +197,7 @@ if ev_show is None or ev_show.height == 0:
     st.caption("No eval rows to chart yet. Run: make eval")
 else:
     ev_chart = ev_show.select(["method", "abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(ev_chart, width="stretch")
+    st.bar_chart(ev_chart, use_container_width=True)
 
 
 st.subheader("Scorecard (across campaigns)")
@@ -248,17 +248,17 @@ else:
         .sort(["mean_abs_bias", "median_abs_bias"])
     )
 
-    st.dataframe(scorecard.to_pandas(), width="stretch")
+    st.dataframe(scorecard.to_pandas(), use_container_width=True)
 
     # Quick chart: mean_abs_bias by method
     chart_df = scorecard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(chart_df, width="stretch")
+    st.bar_chart(chart_df, use_container_width=True)
 
     # Optional: winners table
     with st.expander("Winners by campaign"):
         st.dataframe(
             winners.sort("campaign_id").to_pandas(),
-            width="stretch"
+            use_container_width=True
         )
 
 
@@ -273,19 +273,19 @@ else:
 
     st.dataframe(
         diag.select(["campaign_id","method","abs_bias","pretrend_p","rmse_pre"]).to_pandas(),
-        width="stretch"
+        use_container_width=True
     )
 
 # simple charts (Streamlit native)
     if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
         pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
         st.caption("Pretrend p-values by method (lower can indicate violation risk)")
-        st.bar_chart(pchart, width="stretch")
+        st.bar_chart(pchart, use_container_width=True)
 
     if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
         rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
         st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
-        st.bar_chart(rchart, width="stretch")
+        st.bar_chart(rchart, use_container_width=True)
 
     st.sidebar.subheader("Campaign sweep")
     n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
@@ -410,10 +410,10 @@ if series_file:
     lift_col = "lift_hat_units" if "lift_hat_units" in ts.columns else "lift_hat"
 
     st.subheader("Synthetic control: treated vs counterfactual")
-    st.line_chart(ts_pd[["y_treated", "y0_hat"]], width="stretch")
+    st.line_chart(ts_pd[["y_treated", "y0_hat"]], use_container_width=True)
 
     st.subheader("Synthetic control: estimated lift over time")
-    st.line_chart(ts_pd[[lift_col]], width="stretch")
+    st.line_chart(ts_pd[[lift_col]], use_container_width=True)
 
     # Metrics (true vs estimated) from eval row if available
     if best_scm_row is not None:
@@ -451,7 +451,7 @@ if series_file:
 
             st.dataframe(
                 wdf.select(["donor_id", "weight", "abs_weight"]).head(top_n).to_pandas(),
-                width="stretch"
+                use_container_width=True
             )
 
             # quick chart
@@ -461,7 +461,7 @@ if series_file:
                    .to_pandas()
                    .set_index("donor_id")
             )
-            st.bar_chart(wchart, width="stretch")
+            st.bar_chart(wchart, use_container_width=True)
         else:
             st.caption(f"No weights file found at {weights_path.name}. Re-run: make scm CAMPAIGN_ID={campaign_id} ...")
 
@@ -504,7 +504,7 @@ else:
 
 st.subheader("Method results")
 res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
-st.dataframe(res_show.to_pandas(), width="stretch")
+st.dataframe(res_show.to_pandas(), use_container_width=True)
 
 es_path = processed_dir / f"event_study_{campaign_id}.parquet"
 st.subheader("Event study")
@@ -513,8 +513,8 @@ if es_path.exists():
     es_pd = es.to_pandas().set_index("rel_day")
 
     if "beta" in es_pd.columns:
-        st.line_chart(es_pd[["beta"]], width="stretch")
-    st.dataframe(es.to_pandas(), width="stretch")
+        st.line_chart(es_pd[["beta"]], use_container_width=True)
+    st.dataframe(es.to_pandas(), use_container_width=True)
 else:
     st.caption(f"No event study file found at {es_path}.")
 
@@ -565,7 +565,7 @@ else:
         .sort(["n_campaigns", "rmse_pre_avg"], descending=[True, False])
     )
 
-    st.dataframe(leaderboard.to_pandas(), width="stretch")
+    st.dataframe(leaderboard.to_pandas(), use_container_width=True)
 
 
 res_show = results.filter(pl.col("campaign_id") == campaign_id).sort("method")
