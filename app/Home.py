@@ -5,6 +5,8 @@ from pathlib import Path
 import polars as pl
 import streamlit as st
 import numpy as np
+import matplotlib.pyplot as plt
+
 
 def safe_float(x):
     try:
@@ -396,6 +398,70 @@ else:
         default_idx = series_candidates.index(picked_series)
 
     series_file = st.sidebar.selectbox("SCM series file", series_candidates, index=default_idx)
+
+with st.expander("Placebo tests (fake treatment dates)", expanded=False):
+    if best_scm_row is None:
+        st.caption("No SCM method selected (run eval / SCM first).")
+    else:
+        # infer grain/log1p from best SCM method name
+        method = str(best_scm_row["method"])
+        grain = "store_dept" if "store_dept" in method else "store"
+        log1p = "_log1p" if "log1p" in method else ""
+
+        placebo_path = processed_dir / f"scm_placebo_{campaign_id}_{grain}{log1p}.parquet"
+
+        if not placebo_path.exists():
+            st.caption(
+                f"No placebo file found at {placebo_path.name}. Run:\n"
+                f"`python src/m5lift/methods/placebo_scm.py --processed_dir {processed_dir} "
+                f"--campaign_id {campaign_id} --donor_grain {grain} "
+                f"{'--use_log1p ' if 'log1p' in method else ''}--alpha 50 --n_placebos 50`"
+            )
+        else:
+            plc = pl.read_parquet(placebo_path)
+
+            # actual SCM estimate in UNITS (same as your method results)
+            actual_units = float(best_scm_row.get("att_hat") or best_scm_row.get("att_hat_used") or 0.0)
+
+            vals = plc["att_hat_units"].to_numpy()
+            if vals.size < 5:
+                st.warning("Placebo file exists but has too few rows to chart.")
+            else:
+                # empirical two-sided p-value vs placebo distribution
+                abs_vals = np.abs(vals)
+                abs_act = abs(actual_units)
+                p_two = float((abs_vals >= abs_act).mean())
+
+                q025, q50, q975 = np.quantile(vals, [0.025, 0.5, 0.975]).tolist()
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Actual SCM lift (units)", f"{actual_units:,.2f}")
+                c2.metric("Placebo median (units)", f"{q50:,.2f}")
+                c3.metric("95% placebo interval", f"[{q025:,.2f}, {q975:,.2f}]")
+                c4.metric("Empirical p (two-sided)", f"{p_two:.3f}")
+
+                # histogram (matplotlib) — avoids Streamlit/Altair width issues
+                fig, ax = plt.subplots()
+                ax.hist(vals, bins=25)
+                ax.axvline(actual_units, linestyle="--")
+                ax.set_title("Placebo lift distribution (SCM, units)")
+                ax.set_xlabel("ATT (units) under placebo windows")
+                ax.set_ylabel("Count")
+                st.pyplot(fig)
+
+                st.caption(
+                    "Interpretation: if the actual lift is far in the tails of the placebo distribution "
+                    "(low empirical p-value), the effect is less likely to be a timing artifact."
+                )
+
+                with st.expander("Placebo runs table"):
+                    st.dataframe(
+                        plc.select(["placebo_start", "placebo_end", "att_hat_units", "rmse_pre", "cv"])
+                           .sort("att_hat_units", descending=True)
+                           .to_pandas(),
+                        width="stretch"
+                    )
+
 
 # --- Plot SCM series + show lift metrics ---
 ts = None

@@ -5,3 +5,4 @@ streamlit
 altair
 statsmodels
 scipy
+matplotlib
