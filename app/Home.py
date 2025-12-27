@@ -197,7 +197,7 @@ if ev_show is None or ev_show.height == 0:
     st.caption("No eval rows to chart yet. Run: make eval")
 else:
     ev_chart = ev_show.select(["method", "abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(ev_chart, width="container")
+    st.bar_chart(ev_chart, use_container_width=True)
 
 
 st.subheader("Scorecard (across campaigns)")
@@ -252,7 +252,7 @@ else:
 
     # Quick chart: mean_abs_bias by method
     chart_df = scorecard.select(["method", "mean_abs_bias"]).to_pandas().set_index("method")
-    st.bar_chart(chart_df, width="container")
+    st.bar_chart(chart_df, use_container_width=True)
 
     # Optional: winners table
     with st.expander("Winners by campaign"):
@@ -280,12 +280,12 @@ else:
     if diag.select(pl.col("pretrend_p").is_not_null().any()).item():
         pchart = diag.filter(pl.col("pretrend_p").is_not_null()).select(["method","pretrend_p"]).to_pandas().set_index("method")
         st.caption("Pretrend p-values by method (lower can indicate violation risk)")
-        st.bar_chart(pchart, width="container")
+        st.bar_chart(pchart, use_container_width=True)
 
     if diag.select(pl.col("rmse_pre").is_not_null().any()).item():
         rchart = diag.filter(pl.col("rmse_pre").is_not_null()).select(["method","rmse_pre"]).to_pandas().set_index("method")
         st.caption("Pre-period fit RMSE (lower is better on the fit scale)")
-        st.bar_chart(rchart, width="container")
+        st.bar_chart(rchart, use_container_width=True)
 
     st.sidebar.subheader("Campaign sweep")
     n = st.sidebar.number_input("n_campaigns", 1, 20, 5)
@@ -461,7 +461,7 @@ if series_file:
                    .to_pandas()
                    .set_index("donor_id")
             )
-            st.bar_chart(wchart, width="container")
+            st.bar_chart(wchart, use_container_width=True)
         else:
             st.caption(f"No weights file found at {weights_path.name}. Re-run: make scm CAMPAIGN_ID={campaign_id} ...")
 

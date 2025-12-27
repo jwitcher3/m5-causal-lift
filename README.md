@@ -1,35 +1,23 @@
-## What this project is
-
-**M5 Causal Lift** is an incrementality sandbox that:
-1) Simulates a campaign on top of the M5-style retail data generating process (DGP)
-2) Produces **ground truth** causal lift (known ATT)
-3) Runs causal methods (e.g., **DiD / TWFE**, **Synthetic Control (ridge)**)
-4) Evaluates each method against the known truth and surfaces results in a Streamlit app
-
-The goal is to build intuition and guardrails for incrementality measurement (fit quality, stability, pretrend risk),
-using a fully controlled environment where "truth" is observable.
-
----
-
-## Quickstart
-
-Create data + run methods end-to-end:
-
-```bash
-make pipeline
-make app
-
-
+# M5 Causal Lift (Incrementality Sandbox)
+cat > README.md <<'MD'
 # M5 Causal Lift (Incrementality Sandbox)
 
-End-to-end portfolio project using the M5 Forecasting dataset as a base, with simulated campaigns (ground-truth lift),
-DiD/Event Study, and Synthetic Control, evaluated against the simulator.
+A small, end-to-end **incrementality sandbox** using **M5-style simulated retail data**.
+It simulates treatment/control campaigns and evaluates causal methods against **known ground truth**.
+
+## What you get
+- Campaign simulator (creates treated/control + true effect)
+- Methods:
+  - DiD / event study
+  - Synthetic Control (ridge SCM, optional `log1p` fit)
+- Evaluation vs ground truth (scale-aware)
+- Streamlit app to explore results + scorecard + diagnostics
+- SCM interpretability: donor weights + lift stability (CV)
 
 ## Quickstart
 
+### 1) Setup
 ```bash
-make help
-make install
-make pipeline
-make app
-'''
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
