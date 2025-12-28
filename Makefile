@@ -12,6 +12,7 @@ END_DATE ?= 2014-06-28
 TREAT_FRAC ?= 0.2
 MAX_UPLIFT ?= 0.15
 SEED ?= 7
+PROCESSED_DIR ?= data/processed
 
 DONOR_GRAIN ?= store_dept
 ALPHA ?= 50
@@ -19,7 +20,7 @@ USE_LOG1P ?= 1
 
 PORT ?= 8501
 
-.PHONY: help venv install dirs processed features simulate did scm eval pipeline app clean
+.PHONY: help venv install dirs processed features simulate did scm eval placebo pipeline app clean
 
 help:
 	@echo "Targets: venv install processed features simulate did scm eval pipeline app clean"
@@ -48,6 +49,20 @@ simulate: dirs
 	$(PY) src/m5lift/sim/simulator.py --processed_dir $(OUT_DIR) --grain $(GRAIN) \
 	--campaign_id $(CAMPAIGN_ID) --start_date $(START_DATE) --end_date $(END_DATE) \
 	--treat_frac $(TREAT_FRAC) --max_uplift $(MAX_UPLIFT) --seed $(SEED)
+
+N_PLACEBOS ?= 50
+MIN_PRE_DAYS ?= 28
+
+placebo:
+	$(PY) src/m5lift/methods/placebo_scm.py \
+		--processed_dir $(PROCESSED_DIR) \
+		--campaign_id $(CAMPAIGN_ID) \
+		--donor_grain $(DONOR_GRAIN) \
+		$(if $(filter 1,$(USE_LOG1P)),--use_log1p,) \
+		--alpha $(ALPHA) \
+		--n_placebos $(N_PLACEBOS) \
+		--min_pre_days $(MIN_PRE_DAYS) \
+		--seed $(SEED)
 
 did: dirs
 	$(PY) src/m5lift/methods/did_event_study.py --processed_dir $(OUT_DIR) --grain $(GRAIN) --campaign_id $(CAMPAIGN_ID)
