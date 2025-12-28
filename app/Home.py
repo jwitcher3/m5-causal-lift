@@ -554,6 +554,36 @@ c1.metric("SCM confidence", f"{scm_grade} — {recommendation_from_grade(scm_gra
 c2.metric("DiD confidence", f"{did_grade} — {recommendation_from_grade(did_grade)}")
 c3.metric("Primary KPI", "Units")
 
+# --- Placebo check (optional) ---
+placebo_p = None
+try:
+    grain = "store_dept" if ("store_dept" in (series_file or "")) else "store"
+    log1p = ("_log1p" in (series_file or ""))
+    placebo_path = processed_dir / f"scm_placebo_{campaign_id}_{grain}{'_log1p' if log1p else ''}.parquet"
+    if placebo_path.exists() and best_scm_method is not None:
+        plc = pl.read_parquet(placebo_path)
+        if "att_hat_units" in plc.columns:
+            # real units ATT from fact_method_results for the best method (if present)
+            real_att_units = None
+            real_row = (
+                results.filter((pl.col("campaign_id") == campaign_id) & (pl.col("method") == best_scm_method))
+                .select(["att_hat"])
+            )
+            if real_row.height > 0:
+                real_att_units = float(real_row["att_hat"][0])
+
+            if real_att_units is not None:
+                plc_att = plc["att_hat_units"].to_numpy()
+                placebo_p = float(np.mean(np.abs(plc_att) >= abs(real_att_units)))
+except Exception:
+    placebo_p = None
+
+if placebo_p is not None:
+    st.caption(f"Placebo check (SCM): two-sided p-value = {placebo_p:.3f} (lower is better)")
+    if placebo_p > 0.10:
+        st.warning(f"SCM placebo: observed lift is not rare vs placebo dates (p={placebo_p:.3f}).")
+
+
 if scm_flags:
     st.warning("SCM checks:\n- " + "\n- ".join(scm_flags))
 if did_flags:
