@@ -400,67 +400,78 @@ else:
     series_file = st.sidebar.selectbox("SCM series file", series_candidates, index=default_idx)
 
 with st.expander("Placebo tests (fake treatment dates)", expanded=False):
-    if best_scm_row is None:
+    if best_scm_method is None:
         st.caption("No SCM method selected (run eval / SCM first).")
     else:
-        # infer grain/log1p from best SCM method name
-        method = str(best_scm_row["method"])
+        method = str(best_scm_method)
         grain = "store_dept" if "store_dept" in method else "store"
-        log1p = "_log1p" if "log1p" in method else ""
+        log1p_suffix = "_log1p" if "log1p" in method else ""
 
-        placebo_path = processed_dir / f"scm_placebo_{campaign_id}_{grain}{log1p}.parquet"
+        placebo_path = processed_dir / f"scm_placebo_{campaign_id}_{grain}{log1p_suffix}.parquet"
 
-        if not placebo_path.exists():
-            st.caption(
-                f"No placebo file found at {placebo_path.name}. Run:\n"
-                f"`python src/m5lift/methods/placebo_scm.py --processed_dir {processed_dir} "
-                f"--campaign_id {campaign_id} --donor_grain {grain} "
-                f"{'--use_log1p ' if 'log1p' in method else ''}--alpha 50 --n_placebos 50`"
-            )
+        # Pull the *units* ATT from fact_method_results (not from eval)
+        real_row = (
+            results
+            .filter((pl.col("campaign_id") == campaign_id) & (pl.col("method") == method))
+            .select(["att_hat", "rmse_pre"])
+        )
+
+        if real_row.height == 0:
+            st.caption("Could not find the SCM row in fact_method_results (run `make scm` again).")
         else:
-            plc = pl.read_parquet(placebo_path)
+            actual_units = float(real_row["att_hat"][0])
 
-            # actual SCM estimate in UNITS (same as your method results)
-            actual_units = float(best_scm_row.get("att_hat") or best_scm_row.get("att_hat_used") or 0.0)
-
-            vals = plc["att_hat_units"].to_numpy()
-            if vals.size < 5:
-                st.warning("Placebo file exists but has too few rows to chart.")
-            else:
-                # empirical two-sided p-value vs placebo distribution
-                abs_vals = np.abs(vals)
-                abs_act = abs(actual_units)
-                p_two = float((abs_vals >= abs_act).mean())
-
-                q025, q50, q975 = np.quantile(vals, [0.025, 0.5, 0.975]).tolist()
-
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Actual SCM lift (units)", f"{actual_units:,.2f}")
-                c2.metric("Placebo median (units)", f"{q50:,.2f}")
-                c3.metric("95% placebo interval", f"[{q025:,.2f}, {q975:,.2f}]")
-                c4.metric("Empirical p (two-sided)", f"{p_two:.3f}")
-
-                # histogram (matplotlib) — avoids Streamlit/Altair width issues
-                fig, ax = plt.subplots()
-                ax.hist(vals, bins=25)
-                ax.axvline(actual_units, linestyle="--")
-                ax.set_title("Placebo lift distribution (SCM, units)")
-                ax.set_xlabel("ATT (units) under placebo windows")
-                ax.set_ylabel("Count")
-                st.pyplot(fig)
-
-                st.caption(
-                    "Interpretation: if the actual lift is far in the tails of the placebo distribution "
-                    "(low empirical p-value), the effect is less likely to be a timing artifact."
+            if not placebo_path.exists():
+                st.caption(f"No placebo file found at {placebo_path.name}. Run:")
+                st.code(
+                    f"make placebo CAMPAIGN_ID={campaign_id} DONOR_GRAIN={grain} USE_LOG1P={1 if 'log1p' in method else 0} "
+                    f"ALPHA=50 N_PLACEBOS=50",
+                    language="bash",
                 )
+            else:
+                plc = pl.read_parquet(placebo_path)
+                if "att_hat_units" not in plc.columns:
+                    st.error(f"Expected att_hat_units in placebo file. Found: {plc.columns}")
+                else:
+                    vals = plc["att_hat_units"].to_numpy().astype(float)
+                    vals = vals[np.isfinite(vals)]
 
-                with st.expander("Placebo runs table"):
-                    st.dataframe(
-                        plc.select(["placebo_start", "placebo_end", "att_hat_units", "rmse_pre", "cv"])
-                           .sort("att_hat_units", descending=True)
-                           .to_pandas(),
-                        width="stretch"
-                    )
+                    if vals.size < 5:
+                        st.warning("Placebo file exists but has too few valid rows to chart.")
+                    else:
+                        abs_vals = np.abs(vals)
+                        p_two = float((abs_vals >= abs(actual_units)).mean())
+
+                        q025, q50, q975 = np.quantile(vals, [0.025, 0.5, 0.975]).tolist()
+
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Actual SCM lift (units)", f"{actual_units:,.2f}")
+                        c2.metric("Placebo median (units)", f"{q50:,.2f}")
+                        c3.metric("95% placebo interval", f"[{q025:,.2f}, {q975:,.2f}]")
+                        c4.metric("Empirical p (two-sided)", f"{p_two:.3f}")
+
+                        # Histogram WITHOUT matplotlib (avoids dependency + width issues)
+                        counts, edges = np.histogram(vals, bins=25)
+                        centers = (edges[:-1] + edges[1:]) / 2
+                        hist_df = (
+                            pl.DataFrame({"bin_center": centers, "count": counts})
+                            .to_pandas()
+                            .set_index("bin_center")
+                        )
+                        st.bar_chart(hist_df)  # <-- no width args (most compatible)
+
+                        st.caption(
+                            "Interpretation: if the actual lift is deep in the tails of placebo lifts "
+                            "(low p-value), the effect is less likely a timing artifact."
+                        )
+
+                        with st.expander("Placebo runs table"):
+                            st.dataframe(
+                                plc.select(["placebo_start", "placebo_end", "att_hat_units", "rmse_pre", "cv"])
+                                   .sort("att_hat_units", descending=True)
+                                   .to_pandas(),
+                                width="stretch",  # dataframe supports this
+                            )
 
 
 # --- Plot SCM series + show lift metrics ---
@@ -553,35 +564,6 @@ c1, c2, c3 = st.columns(3)
 c1.metric("SCM confidence", f"{scm_grade} — {recommendation_from_grade(scm_grade)}")
 c2.metric("DiD confidence", f"{did_grade} — {recommendation_from_grade(did_grade)}")
 c3.metric("Primary KPI", "Units")
-
-# --- Placebo check (optional) ---
-placebo_p = None
-try:
-    grain = "store_dept" if ("store_dept" in (series_file or "")) else "store"
-    log1p = ("_log1p" in (series_file or ""))
-    placebo_path = processed_dir / f"scm_placebo_{campaign_id}_{grain}{'_log1p' if log1p else ''}.parquet"
-    if placebo_path.exists() and best_scm_method is not None:
-        plc = pl.read_parquet(placebo_path)
-        if "att_hat_units" in plc.columns:
-            # real units ATT from fact_method_results for the best method (if present)
-            real_att_units = None
-            real_row = (
-                results.filter((pl.col("campaign_id") == campaign_id) & (pl.col("method") == best_scm_method))
-                .select(["att_hat"])
-            )
-            if real_row.height > 0:
-                real_att_units = float(real_row["att_hat"][0])
-
-            if real_att_units is not None:
-                plc_att = plc["att_hat_units"].to_numpy()
-                placebo_p = float(np.mean(np.abs(plc_att) >= abs(real_att_units)))
-except Exception:
-    placebo_p = None
-
-if placebo_p is not None:
-    st.caption(f"Placebo check (SCM): two-sided p-value = {placebo_p:.3f} (lower is better)")
-    if placebo_p > 0.10:
-        st.warning(f"SCM placebo: observed lift is not rare vs placebo dates (p={placebo_p:.3f}).")
 
 
 if scm_flags:

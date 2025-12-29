@@ -79,10 +79,8 @@ st.caption("If the campaign lift is real, it should look extreme relative to pla
 if not placebo_path.exists():
     st.warning(f"Missing placebo file: {placebo_path.name}")
     st.code(
-        f"python src/m5lift/methods/placebo_scm.py --processed_dir {processed_dir} "
-        f"--campaign_id {campaign_id} --donor_grain {grain} "
-        f"{'--use_log1p ' if log1p else ''}--alpha 50 --n_placebos 50",
-        language="bash",
+    f"make placebo CAMPAIGN_ID={campaign_id} DONOR_GRAIN={grain} USE_LOG1P={1 if log1p else 0} ALPHA=50 N_PLACEBOS=50",
+    language="bash",
     )
     st.stop()
 
@@ -92,6 +90,7 @@ if "att_hat_units" not in pb.columns:
     st.stop()
 
 pb_lifts = pb["att_hat_units"].to_numpy().astype(float)
+pb_lifts = pb_lifts[np.isfinite(pb_lifts)]
 
 # empirical two-sided p-value: how often placebo is as extreme as actual
 p_val = None
@@ -133,11 +132,15 @@ if rmse_pre is not None and rmse_pre > 0.35:
 else:
     checks.append("✅ Pre-fit RMSE looks acceptable (or not available).")
 
-if p_val is not None and p_val < 0.10:
-    checks.append(f"✅ Placebo test passes (p={p_val:.3f}): lift is relatively rare under placebo.")
+if p_val is not None and p_val <= 0.10:
+    checks.append(f"✅ Placebo test PASS (p={p_val:.3f}): lift is rare under placebo.")
+elif p_val is not None and p_val <= 0.20:
+    checks.append(f"⚠️ Placebo test CAUTION (p={p_val:.3f}): lift is somewhat common under placebo.")
 elif p_val is not None:
-    checks.append(f"⚠️ Placebo test weak (p={p_val:.3f}): lift is common under placebo → be cautious.")
+    checks.append(f"❌ Placebo test FAIL (p={p_val:.3f}): lift is common under placebo → likely noise.")
 else:
     checks.append("⚠️ Missing p-value (no SCM ATT found).")
 
+
 st.markdown("\n".join([f"- {c}" for c in checks]))
+
