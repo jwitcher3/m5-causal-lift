@@ -237,3 +237,9 @@ p = mean(|ATT_placebo| >= |ATT_real|)
 * `make check` passes
 * Streamlit runs without deprecation warnings (e.g., `use_container_width` removed)
 * README documents: what it is, how to run, and how to interpret outputs
+
+## Documentation
+- [End-to-end guide (DOCX)](docs/end_to_end_guide.docx)
+
+## Documentation
+- docs/M5_Causal_Lift_End_to_End_Guide_v2.docx
