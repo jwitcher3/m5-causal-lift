@@ -23,3 +23,11 @@ It simulates treatment/control campaigns and evaluates causal methods against **
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+## Demo (one command)
+
+From repo root:
+
+```bash
+./scripts/demo.sh
+

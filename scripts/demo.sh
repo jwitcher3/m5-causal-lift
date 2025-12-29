@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -euo pipefail
 # Demo defaults (override via env vars)
 CAMPAIGN_ID="${CAMPAIGN_ID:-cmp_demo}"
