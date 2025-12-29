@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 # Demo defaults (override via env vars)
 CAMPAIGN_ID="${CAMPAIGN_ID:-cmp_demo}"
 START_DATE="${START_DATE:-2014-08-01}"
@@ -23,12 +24,13 @@ echo "SCM: DONOR_GRAIN=$DONOR_GRAIN USE_LOG1P=$USE_LOG1P ALPHA=$ALPHA"
 echo "Placebos: N_PLACEBOS=$N_PLACEBOS MIN_PRE_DAYS=$MIN_PRE_DAYS"
 echo
 
-# Ensure deps are installed
 echo "==> make install"
 make install
 
-# End-to-end pipeline
-echo "==> make pipeline"
+echo "==> make clean"
+make clean
+
+echo "==> make pipeline (includes placebo + check)"
 make pipeline \
   CAMPAIGN_ID="$CAMPAIGN_ID" \
   START_DATE="$START_DATE" \
@@ -38,19 +40,9 @@ make pipeline \
   SEED="$SEED" \
   DONOR_GRAIN="$DONOR_GRAIN" \
   USE_LOG1P="$USE_LOG1P" \
-  ALPHA="$ALPHA"
-
-# Placebo SCM
-echo "==> make placebo"
-make placebo \
-  CAMPAIGN_ID="$CAMPAIGN_ID" \
-  DONOR_GRAIN="$DONOR_GRAIN" \
-  USE_LOG1P="$USE_LOG1P" \
   ALPHA="$ALPHA" \
   N_PLACEBOS="$N_PLACEBOS" \
-  MIN_PRE_DAYS="$MIN_PRE_DAYS" \
-  SEED="$SEED" \
-  PROCESSED_DIR="data/processed"
+  MIN_PRE_DAYS="$MIN_PRE_DAYS"
 
 echo
 echo "==> Launching app on port $PORT"

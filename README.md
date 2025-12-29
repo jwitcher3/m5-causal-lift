@@ -1,4 +1,4 @@
-# M5 Causal Lift (Incrementality Sandbox)
+## M5 Causal Lift (Incrementality Sandbox)
 
 A small, end-to-end **incrementality sandbox** using **M5-style simulated retail data**.
 It simulates treatment/control campaigns and evaluates causal methods against **known ground truth**.
@@ -22,12 +22,4 @@ It simulates treatment/control campaigns and evaluates causal methods against **
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-
-## Demo (one command)
-
-From repo root:
-
-```bash
-./scripts/demo.sh
-
+make install

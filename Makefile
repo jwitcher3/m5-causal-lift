@@ -23,9 +23,13 @@ PORT ?= 8501
 
 .PHONY: help venv install dirs processed features simulate did scm eval placebo check pipeline app clean demo
 
+.PHONY: smoke
+smoke:
+	bash scripts/smoke.sh
+
 
 help:
-	@echo "Targets: venv install processed features simulate did scm eval pipeline app clean"
+	@echo "Targets: venv install processed features simulate did scm eval placebo pipeline check demo app clean smoke"
 
 venv:
 	python3 -m venv .venv
@@ -96,5 +100,5 @@ clean:
 demo:
 	$(MAKE) clean
 	$(MAKE) pipeline CAMPAIGN_ID=cmp_demo START_DATE=2014-08-01 END_DATE=2014-08-28 TREAT_FRAC=0.2 MAX_UPLIFT=0.15 SEED=7
-
+	$(MAKE) smoke
  
