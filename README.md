@@ -1,5 +1,8 @@
 # M5 Causal Lift (Incrementality Sandbox)
 
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 A small, end-to-end **incrementality sandbox** using **M5-style simulated retail data**.  
 It simulates treatment/control campaigns and evaluates causal methods against **known ground truth**.
 

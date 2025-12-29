@@ -1,31 +1,39 @@
-# data
-data/raw/
-data/processed/
-*.parquet
-
-# python
-.venv/
+# Python
 __pycache__/
-*.pyc
-.mypy_cache/
+*.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
+.coverage
+dist/
+build/
+*.egg-info/
 
-# notebooks
-.ipynb_checkpoints/
+# Environments
+.venv/
+venv/
+.env
+.env.*
 
-# OS/editor
+# OS / Editor
 .DS_Store
+Thumbs.db
 .vscode/
+.idea/
 
-# data outputs
+# Streamlit
+.streamlit/secrets.toml
+
+# Data outputs (generated)
 data/processed/
 data/raw/
 
-# python
-.venv/
-__pycache__/
-*.pyc
+# Logs
+*.log
 
-# streamlit
-.streamlit/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/
+
