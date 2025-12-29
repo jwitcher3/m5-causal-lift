@@ -76,10 +76,23 @@ scm: dirs
 
 eval: dirs
 	$(PY) src/m5lift/eval/evaluate.py --processed_dir $(OUT_DIR)
-pipeline: processed features simulate did scm eval placebo
+
+check:
+	@test -f $(PROCESSED_DIR)/fact_ground_truth.parquet || (echo "Missing fact_ground_truth.parquet (run: make simulate)"; exit 1)
+	@test -f $(PROCESSED_DIR)/fact_method_results.parquet || (echo "Missing fact_method_results.parquet (run: make did/make scm)"; exit 1)
+	@test -f $(PROCESSED_DIR)/fact_method_eval.parquet || (echo "Missing fact_method_eval.parquet (run: make eval)"; exit 1)
+	@echo "OK: core artifacts exist."
+
+pipeline: processed features simulate did scm eval placebo check
 
 app:
 	$(PY) -m streamlit run app/Home.py --server.port $(PORT)
 
 clean:
 	rm -rf $(PROCESSED_DIR)
+
+demo:
+	$(MAKE) clean
+	$(MAKE) pipeline CAMPAIGN_ID=cmp_demo START_DATE=2014-08-01 END_DATE=2014-08-28 TREAT_FRAC=0.2 MAX_UPLIFT=0.15 SEED=7
+
+ 
