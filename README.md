@@ -1,15 +1,18 @@
 # M5 Causal Lift (Incrementality Sandbox)
 
-An end-to-end **incrementality sandbox** on **M5-style simulated retail data**.  
+A small, end-to-end **incrementality sandbox** using **M5-style simulated retail data**.
 It simulates treatment/control campaigns and evaluates causal methods against **known ground truth**.
 
 ## What you get
-- **Campaign simulator** (treated/control + true effect)
+- **Campaign simulator** (creates treated/control + true effect)
 - **Methods**
-  - DiD / Event Study (TWFE-style)
-  - Synthetic Control (ridge SCM; optional log1p fit)
-- **Evaluation vs ground truth** (scale-aware scoring table)
-- **Streamlit app** to explore results, method scorecards, SCM interpretability (donor weights), and trust checks (placebos)
+  - DiD / event study
+  - Synthetic Control (ridge SCM, optional log1p fit)
+- **Evaluation vs ground truth** (scale-aware)
+- **Streamlit app** to explore results, scorecard, diagnostics, and SCM interpretability (donor weights)
+- **Method trust checks**
+  - Pre-fit RMSE + stability (CV)
+  - **Placebo tests** (fake treatment dates) + placebo lift distribution
 
 ---
 

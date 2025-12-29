@@ -55,7 +55,7 @@ MIN_PRE_DAYS ?= 28
 
 placebo:
 	$(PY) src/m5lift/methods/placebo_scm.py \
-		--processed_dir $(PROCESSED_DIR) \
+		--processed_dir $(OUT_DIR) \
 		--campaign_id $(CAMPAIGN_ID) \
 		--donor_grain $(DONOR_GRAIN) \
 		$(if $(filter 1,$(USE_LOG1P)),--use_log1p,) \
@@ -76,7 +76,7 @@ scm: dirs
 
 eval: dirs
 	$(PY) src/m5lift/eval/evaluate.py --processed_dir $(OUT_DIR)
-pipeline: processed features simulate did scm eval
+pipeline: processed features simulate did scm eval placebo
 
 app:
 	$(PY) -m streamlit run app/Home.py --server.port $(PORT)
