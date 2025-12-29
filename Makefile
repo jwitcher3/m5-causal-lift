@@ -3,7 +3,6 @@ SHELL := /bin/bash
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-OUT_DIR ?= data/processed
 RAW_DIR ?= data/raw
 GRAIN ?= store_dept
 CAMPAIGN_ID ?= cmp_001
@@ -13,6 +12,8 @@ TREAT_FRAC ?= 0.2
 MAX_UPLIFT ?= 0.15
 SEED ?= 7
 PROCESSED_DIR ?= data/processed
+OUT_DIR := $(PROCESSED_DIR)
+
 
 DONOR_GRAIN ?= store_dept
 ALPHA ?= 50
@@ -20,7 +21,8 @@ USE_LOG1P ?= 1
 
 PORT ?= 8501
 
-.PHONY: help venv install dirs processed features simulate did scm eval placebo pipeline app clean
+.PHONY: help venv install dirs processed features simulate did scm eval placebo check pipeline app clean demo
+
 
 help:
 	@echo "Targets: venv install processed features simulate did scm eval pipeline app clean"
@@ -37,7 +39,7 @@ install: venv
 	fi
 
 dirs:
-	mkdir -p $(OUT_DIR)
+	mkdir -p $(PROCESSED_DIR)
 
 processed: dirs
 	$(PY) src/m5lift/io/build_processed.py --raw_dir $(RAW_DIR) --out_dir $(OUT_DIR) --grain $(GRAIN)
@@ -55,7 +57,7 @@ MIN_PRE_DAYS ?= 28
 
 placebo:
 	$(PY) src/m5lift/methods/placebo_scm.py \
-		--processed_dir $(OUT_DIR) \
+		--processed_dir $(PROCESSED_DIR) \
 		--campaign_id $(CAMPAIGN_ID) \
 		--donor_grain $(DONOR_GRAIN) \
 		$(if $(filter 1,$(USE_LOG1P)),--use_log1p,) \
